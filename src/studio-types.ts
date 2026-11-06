@@ -1,4 +1,4 @@
-import type { AudioData, StudioSettings } from "./audio/types";
+import type { AudioData, EffectInstance, StudioSettings } from "./audio/types";
 
 export interface SavedRecording {
   id: string;
@@ -27,6 +27,13 @@ export interface Studio {
   duration: number;
   settings: StudioSettings;
   updateSettings: (settings: Partial<StudioSettings>) => void;
+  effectChain: EffectInstance[];
+  selectedEffectId: string | null;
+  addEffect: (presetId: string) => void;
+  selectEffect: (id: string) => void;
+  removeEffect: (id: string) => void;
+  toggleEffect: (id: string) => void;
+  moveEffect: (id: string, direction: -1 | 1) => void;
   resetSettings: () => void;
   processing: boolean;
   playing: boolean;

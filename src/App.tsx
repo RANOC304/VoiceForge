@@ -9,8 +9,10 @@ import {
 } from "react";
 import {
   Activity,
+  ArrowDown,
   ArrowDownToLine,
   ArrowRight,
+  ArrowUp,
   AudioLines,
   Check,
   ChevronDown,
@@ -26,6 +28,7 @@ import {
   Music2,
   Pause,
   Play,
+  Power,
   Plus,
   Radio,
   RefreshCcw,
@@ -45,8 +48,11 @@ import {
 } from "lucide-react";
 import { useStudio } from "./useStudio";
 import { PRESETS, CATEGORIES } from "./audio/presets";
-import type { EffectPreset } from "./audio/types";
+import type { EffectPreset, StudioSettings } from "./audio/types";
 import type { Studio } from "./studio-types";
+import { TrimOverlay } from "./components/TrimOverlay";
+import { waveformPeaks } from "./audio/utils";
+import { resizeTrim, type TrimRange } from "./trim";
 
 const formatTime = (seconds: number, decimals = false) => {
   const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
@@ -58,6 +64,26 @@ const formatTime = (seconds: number, decimals = false) => {
     .padStart(2, "0");
   return `${minutes}:${rest}${decimals ? `.${Math.floor((safe % 1) * 10)}` : ""}`;
 };
+
+function effectSummary(settings: StudioSettings): string {
+  if (settings.effectChain) {
+    const names = settings.effectChain
+      .filter((effect) => effect.enabled)
+      .map(
+        (effect) =>
+          PRESETS.find((preset) => preset.id === effect.presetId)?.name,
+      )
+      .filter(Boolean);
+    if (names.length) return names.join(" + ");
+    return settings.pitch || settings.reverb || settings.echo
+      ? "Custom mix"
+      : "Original";
+  }
+  return (
+    PRESETS.find((preset) => preset.id === settings.presetId)?.name ||
+    "Original"
+  );
+}
 
 function PresetIcon({
   preset,
@@ -172,6 +198,7 @@ function RangeControl({
   display,
   onChange,
   disabled,
+  ariaLabel,
 }: {
   label: string;
   value: number;
@@ -181,6 +208,7 @@ function RangeControl({
   display: string;
   onChange: (value: number) => void;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   return (
     <label className="range-control">
@@ -190,6 +218,7 @@ function RangeControl({
       </span>
       <input
         type="range"
+        aria-label={ariaLabel || label}
         min={min}
         max={max}
         step={step}
@@ -206,31 +235,62 @@ function RangeControl({
   );
 }
 
-function Waveform({ studio }: { studio: Studio }) {
+function Waveform({
+  studio,
+  trimOpen,
+  trimRange,
+  onDraft,
+  onCommit,
+}: {
+  studio: Studio;
+  trimOpen: boolean;
+  trimRange: TrimRange;
+  onDraft: (range: TrimRange | null) => void;
+  onCommit: (range: TrimRange) => void;
+}) {
   const live = studio.recordingState !== "idle";
-  const values = live ? studio.inputWaveform : studio.waveform;
+  const sourceWaveform = useMemo(
+    () => (trimOpen && studio.audio ? waveformPeaks(studio.audio.samples) : []),
+    [trimOpen, studio.audio],
+  );
+  const values = live
+    ? studio.inputWaveform
+    : trimOpen
+      ? sourceWaveform
+      : studio.waveform;
+  const duration =
+    trimOpen && studio.audio
+      ? studio.audio.samples.length / studio.audio.sampleRate
+      : studio.duration;
   const count = 140;
   const bars = Array.from({ length: count }, (_, index) => {
     if (!values.length) return 3;
     const point = values[Math.floor((index / count) * values.length)] ?? 0;
     return Math.max(3, Math.min(88, Math.abs(point) * 100));
   });
-  const end = studio.settings.trimEnd || studio.duration;
-  const position = studio.duration
-    ? Math.min(100, (studio.playhead / studio.duration) * 100)
+  const end = trimOpen ? trimRange.end : studio.settings.trimEnd || duration;
+  const timelinePlayhead =
+    trimOpen && !studio.originalPreview && studio.duration
+      ? trimRange.start +
+        (studio.playhead / studio.duration) * (trimRange.end - trimRange.start)
+      : studio.playhead;
+  const position = duration
+    ? Math.min(100, (timelinePlayhead / duration) * 100)
     : 0;
   return (
     <div
-      className={`waveform ${live ? "is-live" : ""} ${!studio.audio && !live ? "is-empty" : ""}`}
+      className={`waveform ${trimOpen ? "is-trimming" : ""} ${live ? "is-live" : ""} ${!studio.audio && !live ? "is-empty" : ""}`}
     >
       <div className="waveform-grid" />
       <div className="wave-bars" aria-hidden="true">
         {bars.map((height, index) => {
-          const seconds = (index / count) * studio.duration;
+          const seconds = (index / count) * duration;
           const outside =
             studio.audio &&
-            studio.originalPreview &&
-            (seconds < studio.settings.trimStart || seconds > end);
+            (studio.originalPreview || trimOpen) &&
+            (seconds <
+              (trimOpen ? trimRange.start : studio.settings.trimStart) ||
+              seconds > end);
           return (
             <i
               key={index}
@@ -260,7 +320,7 @@ function Waveform({ studio }: { studio: Studio }) {
             : "CAPTURING YOUR VOICE"}
         </div>
       )}
-      {studio.audio && (
+      {studio.audio && !trimOpen && (
         <input
           className="waveform-seek"
           type="range"
@@ -270,6 +330,14 @@ function Waveform({ studio }: { studio: Studio }) {
           value={Math.min(studio.playhead, studio.duration)}
           aria-label="Seek audio"
           onChange={(event) => studio.seek(Number(event.target.value))}
+        />
+      )}
+      {studio.audio && trimOpen && !live && (
+        <TrimOverlay
+          duration={duration}
+          range={trimRange}
+          onDraft={onDraft}
+          onCommit={onCommit}
         />
       )}
     </div>
@@ -289,6 +357,17 @@ function Recorder({
     ? studio.audio.samples.length / studio.audio.sampleRate
     : 0;
   const [trimOpen, setTrimOpen] = useState(false);
+  const [trimDraft, setTrimDraft] = useState<TrimRange | null>(null);
+  const trimRange = trimDraft ?? {
+    start: studio.settings.trimStart,
+    end: studio.settings.trimEnd || sourceDuration,
+  };
+  const commitTrim = (range: TrimRange) =>
+    studio.updateSettings({ trimStart: range.start, trimEnd: range.end });
+  const timelineDuration = trimOpen ? sourceDuration : studio.duration;
+  useEffect(() => {
+    setTrimDraft(null);
+  }, [studio.audio]);
   return (
     <section className="recorder-panel" aria-label="Voice recorder">
       <div className="recorder-heading">
@@ -325,20 +404,26 @@ function Recorder({
               {" "}
               /{" "}
               {formatTime(
-                recording ? studio.recordingSeconds : studio.duration,
+                recording ? studio.recordingSeconds : timelineDuration,
                 true,
               )}
             </span>
           </div>
         </div>
-        <Waveform studio={studio} />
+        <Waveform
+          studio={studio}
+          trimOpen={trimOpen}
+          trimRange={trimRange}
+          onDraft={setTrimDraft}
+          onCommit={commitTrim}
+        />
         <div className="timeline" aria-hidden="true">
           {Array.from({ length: 5 }, (_, index) => (
             <span key={index}>
               {formatTime(
                 ((recording
                   ? Math.max(30, studio.recordingSeconds)
-                  : studio.duration || 30) /
+                  : timelineDuration || 30) /
                   4) *
                   index,
               )}
@@ -403,7 +488,7 @@ function Recorder({
               <button
                 className="transport-button"
                 aria-label="Stop playback"
-                disabled={!studio.audio || busy}
+                disabled={!studio.audio || studio.exporting}
                 onClick={studio.stopPlayback}
               >
                 <Square size={15} fill="currentColor" />
@@ -415,8 +500,11 @@ function Recorder({
             className={`icon-button ${trimOpen ? "selected" : ""}`}
             aria-label="Trim recording"
             title="Trim recording"
-            disabled={!studio.audio || recording || busy}
-            onClick={() => setTrimOpen(!trimOpen)}
+            disabled={!studio.audio || recording || studio.exporting}
+            onClick={() => {
+              setTrimDraft(null);
+              setTrimOpen(!trimOpen);
+            }}
           >
             <Scissors size={17} />
           </button>
@@ -444,13 +532,14 @@ function Recorder({
           <div className="trim-heading">
             <span>
               <Scissors size={14} />
-              Keep a section
+              Drag edges to trim · drag middle to move
             </span>
             <button
               className="text-button"
-              onClick={() =>
-                studio.updateSettings({ trimStart: 0, trimEnd: 0 })
-              }
+              onClick={() => {
+                setTrimDraft(null);
+                studio.updateSettings({ trimStart: 0, trimEnd: 0 });
+              }}
             >
               Reset trim
             </button>
@@ -459,23 +548,20 @@ function Recorder({
             Start{" "}
             <input
               type="number"
+              aria-label="Trim start seconds"
               min={0}
-              max={Math.max(
-                0,
-                (studio.settings.trimEnd || sourceDuration) - 0.05,
-              )}
+              max={Math.max(0, trimRange.end - 0.01)}
               step={0.01}
-              value={studio.settings.trimStart}
+              value={Number(trimRange.start.toFixed(2))}
               onChange={(event) =>
-                studio.updateSettings({
-                  trimStart: Math.max(
-                    0,
-                    Math.min(
-                      Number(event.target.value),
-                      (studio.settings.trimEnd || sourceDuration) - 0.05,
-                    ),
+                commitTrim(
+                  resizeTrim(
+                    trimRange,
+                    "start",
+                    Number(event.target.value),
+                    sourceDuration,
                   ),
-                })
+                )
               }
             />
             <span>sec</span>
@@ -484,27 +570,28 @@ function Recorder({
             End{" "}
             <input
               type="number"
-              min={studio.settings.trimStart + 0.05}
+              aria-label="Trim end seconds"
+              min={Math.min(sourceDuration, trimRange.start + 0.01)}
               max={sourceDuration}
               step={0.01}
-              value={
-                studio.settings.trimEnd || Number(sourceDuration.toFixed(2))
-              }
+              value={Number(trimRange.end.toFixed(2))}
               onChange={(event) =>
-                studio.updateSettings({
-                  trimEnd: Math.min(
+                commitTrim(
+                  resizeTrim(
+                    trimRange,
+                    "end",
+                    Number(event.target.value),
                     sourceDuration,
-                    Math.max(
-                      studio.settings.trimStart + 0.05,
-                      Number(event.target.value),
-                    ),
                   ),
-                })
+                )
               }
             />
             <span>sec</span>
           </label>
-          <p>Your original recording stays intact.</p>
+          <p>
+            {(trimRange.end - trimRange.start).toFixed(2)}s selected · source
+            timeline
+          </p>
         </div>
       )}
       <div className="input-strip">
@@ -578,6 +665,30 @@ function Recorder({
   );
 }
 
+function RecorderDock({ children }: { children: ReactNode }) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const target = anchor.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      ([entry]) =>
+        setStuck(!entry.isIntersecting && entry.boundingClientRect.top < 74),
+      { rootMargin: "-74px 0px 0px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <>
+      <div className="recorder-dock-anchor" ref={anchor} aria-hidden="true" />
+      <div className={`recorder-dock ${stuck ? "is-stuck" : ""}`}>
+        {children}
+      </div>
+    </>
+  );
+}
+
 function EffectsBrowser({
   studio,
   effectsRef,
@@ -641,7 +752,9 @@ function EffectsBrowser({
             A voice for every idea
             <span className="count-pill">{PRESETS.length} effects</span>
           </h2>
-          <p>Find your sound. Pick a preset, then make it your own.</p>
+          <p>
+            Click to add and hear it. Stack up to 8 effects in your own order.
+          </p>
         </div>
         <div className="effects-art" aria-hidden="true">
           <i />
@@ -679,49 +792,68 @@ function EffectsBrowser({
         </label>
       </div>
       <div className="effects-grid">
-        {visible.map((preset) => (
-          <div
-            key={preset.id}
-            className={`effect-card ${studio.settings.presetId === preset.id ? "selected" : ""}`}
-            style={{ "--effect-color": preset.color } as CSSProperties}
-          >
-            <button
-              className="effect-main"
-              disabled={disabled}
-              onClick={() => studio.updateSettings({ presetId: preset.id })}
-              aria-pressed={studio.settings.presetId === preset.id}
-              aria-label={`Apply ${preset.name}`}
+        {visible.map((preset) => {
+          const instance = studio.effectChain.find(
+            (item) => item.presetId === preset.id,
+          );
+          const selected = instance
+            ? instance.id === studio.selectedEffectId
+            : preset.id === "original" && !studio.effectChain.length;
+          return (
+            <div
+              key={preset.id}
+              className={`effect-card ${selected ? "selected" : ""} ${instance ? "in-chain" : ""}`}
+              style={{ "--effect-color": preset.color } as CSSProperties}
             >
-              <span className="effect-icon">
-                <PresetIcon preset={preset} />
-              </span>
-              <span className="effect-name">{preset.name}</span>
-              <span className="effect-description">{preset.description}</span>
-              <span className="effect-footer">
-                <span>{preset.category}</span>
-                {studio.settings.presetId === preset.id ? (
-                  <span className="effect-applied">
-                    <Check size={12} />
-                    APPLIED
-                  </span>
-                ) : (
-                  <ArrowRight size={14} />
-                )}
-              </span>
-            </button>
-            <button
-              className={`favorite-button ${favorites.includes(preset.id) ? "is-favorite" : ""}`}
-              aria-label={`${favorites.includes(preset.id) ? "Unfavorite" : "Favorite"} ${preset.name}`}
-              aria-pressed={favorites.includes(preset.id)}
-              onClick={() => toggleFavorite(preset.id)}
-            >
-              <Heart
-                size={14}
-                fill={favorites.includes(preset.id) ? "currentColor" : "none"}
-              />
-            </button>
-          </div>
-        ))}
+              <button
+                className="effect-main"
+                disabled={disabled}
+                onClick={() =>
+                  preset.id === "original"
+                    ? studio.resetSettings()
+                    : studio.addEffect(preset.id)
+                }
+                aria-pressed={Boolean(instance) || selected}
+                aria-label={`Apply ${preset.name}`}
+                title={
+                  preset.id === "original"
+                    ? "Clear effects and return to original"
+                    : instance
+                      ? "Select and preview this effect in your stack"
+                      : "Add to your effect stack and preview"
+                }
+              >
+                <span className="effect-icon">
+                  <PresetIcon preset={preset} />
+                </span>
+                <span className="effect-name">{preset.name}</span>
+                <span className="effect-description">{preset.description}</span>
+                <span className="effect-footer">
+                  <span>{preset.category}</span>
+                  {selected || instance ? (
+                    <span className="effect-applied">
+                      <Check size={12} />
+                      {selected ? "SELECTED" : "ADDED"}
+                    </span>
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                </span>
+              </button>
+              <button
+                className={`favorite-button ${favorites.includes(preset.id) ? "is-favorite" : ""}`}
+                aria-label={`${favorites.includes(preset.id) ? "Unfavorite" : "Favorite"} ${preset.name}`}
+                aria-pressed={favorites.includes(preset.id)}
+                onClick={() => toggleFavorite(preset.id)}
+              >
+                <Heart
+                  size={14}
+                  fill={favorites.includes(preset.id) ? "currentColor" : "none"}
+                />
+              </button>
+            </div>
+          );
+        })}
       </div>
       {!visible.length && (
         <div className="effects-empty">
@@ -767,10 +899,17 @@ function Inspector({
   studio: Studio;
   onExport: () => void;
 }) {
+  const selectedEffect = studio.effectChain.find(
+    (item) => item.id === studio.selectedEffectId,
+  );
   const preset =
-    PRESETS.find((item) => item.id === studio.settings.presetId) ?? PRESETS[0];
+    PRESETS.find((item) => item.id === selectedEffect?.presetId) ?? PRESETS[0];
   const disabled = studio.recordingState !== "idle" || studio.exporting;
-  const tune = preset.recipe.autotune !== undefined;
+  const tune = studio.effectChain.some(
+    (effect) =>
+      PRESETS.find((item) => item.id === effect.presetId)?.recipe.autotune !==
+      undefined,
+  );
   return (
     <aside className="inspector" aria-label="Effect settings">
       <div className="inspector-heading">
@@ -786,6 +925,104 @@ function Inspector({
           <RotateCcw size={14} />
         </button>
       </div>
+      <section className="effect-chain" aria-label="Effect stack">
+        <div className="effect-chain-heading">
+          <span>
+            EFFECT STACK <b>{studio.effectChain.length}/8</b>
+          </span>
+          <button
+            className="text-button"
+            disabled={disabled || !studio.effectChain.length}
+            onClick={studio.resetSettings}
+          >
+            Clear
+          </button>
+        </div>
+        {!studio.effectChain.length ? (
+          <div className="effect-chain-empty">
+            <Plus size={14} />
+            <span>Pick an effect to start your stack.</span>
+          </div>
+        ) : (
+          <>
+            <ol className="effect-chain-list">
+              {studio.effectChain.map((effect, index) => {
+                const effectPreset =
+                  PRESETS.find((item) => item.id === effect.presetId) ??
+                  PRESETS[0];
+                return (
+                  <li
+                    key={effect.id}
+                    className={`effect-chain-item ${effect.id === studio.selectedEffectId ? "selected" : ""} ${!effect.enabled ? "bypassed" : ""}`}
+                    data-effect-id={effect.id}
+                    data-preset-id={effect.presetId}
+                  >
+                    <div className="effect-chain-row">
+                      <button
+                        className="effect-chain-select"
+                        aria-label={`Select ${effectPreset.name} effect`}
+                        aria-pressed={effect.id === studio.selectedEffectId}
+                        disabled={disabled}
+                        onClick={() => studio.selectEffect(effect.id)}
+                      >
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <strong>{effectPreset.name}</strong>
+                      </button>
+                      <button
+                        className={`chain-power ${effect.enabled ? "enabled" : ""}`}
+                        aria-label={`${effect.enabled ? "Bypass" : "Enable"} ${effectPreset.name}`}
+                        title={
+                          effect.enabled ? "Bypass effect" : "Enable effect"
+                        }
+                        aria-pressed={effect.enabled}
+                        disabled={disabled}
+                        onClick={() => studio.toggleEffect(effect.id)}
+                      >
+                        <Power size={12} />
+                      </button>
+                    </div>
+                    <div className="effect-chain-actions">
+                      <span>
+                        {effect.enabled
+                          ? `${Math.round(effect.intensity * 100)}% strength`
+                          : "BYPASSED"}
+                      </span>
+                      <button
+                        aria-label={`Move ${effectPreset.name} up`}
+                        title="Move effect up"
+                        disabled={disabled || index === 0}
+                        onClick={() => studio.moveEffect(effect.id, -1)}
+                      >
+                        <ArrowUp size={11} />
+                      </button>
+                      <button
+                        aria-label={`Move ${effectPreset.name} down`}
+                        title="Move effect down"
+                        disabled={
+                          disabled || index === studio.effectChain.length - 1
+                        }
+                        onClick={() => studio.moveEffect(effect.id, 1)}
+                      >
+                        <ArrowDown size={11} />
+                      </button>
+                      <button
+                        className="chain-remove"
+                        aria-label={`Remove ${effectPreset.name}`}
+                        title="Remove effect"
+                        disabled={disabled}
+                        onClick={() => studio.removeEffect(effect.id)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="effect-chain-order">Processed from top to bottom.</p>
+          </>
+        )}
+      </section>
       <div
         className="selected-preset"
         style={{ "--effect-color": preset.color } as CSSProperties}
@@ -794,7 +1031,9 @@ function Inspector({
           <span className="effect-icon">
             <PresetIcon preset={preset} size={24} />
           </span>
-          <span className="selected-badge">SELECTED EFFECT</span>
+          <span className="selected-badge">
+            {selectedEffect ? "SELECTED EFFECT" : "ORIGINAL VOICE"}
+          </span>
         </div>
         <h2>{preset.name}</h2>
         <p>{preset.description}</p>
@@ -802,15 +1041,16 @@ function Inspector({
       <div className="inspector-controls">
         <RangeControl
           label="Effect strength"
+          ariaLabel="Effect intensity"
           min={0}
           max={1}
-          value={studio.settings.intensity}
-          display={`${Math.round(studio.settings.intensity * 100)}%`}
+          value={selectedEffect?.intensity ?? studio.settings.intensity}
+          display={`${Math.round((selectedEffect?.intensity ?? studio.settings.intensity) * 100)}%`}
           onChange={(intensity) => studio.updateSettings({ intensity })}
-          disabled={disabled}
+          disabled={disabled || !selectedEffect}
         />
         <div className="control-divider" />
-        <div className="inspector-section-label">FINE-TUNE YOUR SOUND</div>
+        <div className="inspector-section-label">SHAPE THE WHOLE STACK</div>
         <RangeControl
           label="Pitch shift"
           min={-12}
@@ -988,9 +1228,6 @@ function Library({
       ) : (
         <div className="recordings-list">
           {studio.recordings.map((item) => {
-            const preset = PRESETS.find(
-              (preset) => preset.id === item.settings.presetId,
-            );
             return (
               <article className="recording-item" key={item.id}>
                 <span className="recording-item-icon">
@@ -1007,7 +1244,7 @@ function Library({
                     <span>·</span>
                     {formatTime(item.duration)}
                     <span>·</span>
-                    {preset?.name || "Original"}
+                    {effectSummary(item.settings)}
                   </p>
                 </div>
                 <button
@@ -1160,7 +1397,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.0.0"}</span>
+            <span>V{window.voiceforge?.version || "1.1.0"}</span>
           </div>
         </div>
       </aside>
@@ -1208,55 +1445,57 @@ export default function App() {
                     01<span> / STUDIO</span>
                   </span>
                 </div>
-                <div className="session-toolbar">
-                  <div className="session-name">
-                    <AudioLines size={17} />
-                    <input
-                      value={studio.name}
-                      maxLength={100}
-                      aria-label="Recording name"
-                      onChange={(event) => studio.setName(event.target.value)}
-                    />
-                    <span className="session-label">
-                      {studio.audio ? "AUDIO SESSION" : "NEW SESSION"}
-                    </span>
+                <RecorderDock>
+                  <div className="session-toolbar">
+                    <div className="session-name">
+                      <AudioLines size={17} />
+                      <input
+                        value={studio.name}
+                        maxLength={100}
+                        aria-label="Recording name"
+                        onChange={(event) => studio.setName(event.target.value)}
+                      />
+                      <span className="session-label">
+                        {studio.audio ? "AUDIO SESSION" : "NEW SESSION"}
+                      </span>
+                    </div>
+                    <div className="session-actions">
+                      <button
+                        className="button subtle small import-button"
+                        disabled={recording || busy}
+                        onClick={openImport}
+                      >
+                        <Upload size={14} />
+                        Import
+                      </button>
+                      <button
+                        className="button subtle small"
+                        disabled={!studio.audio || recording || busy}
+                        onClick={() => {
+                          void studio.saveRecording();
+                        }}
+                      >
+                        <Save size={14} />
+                        Save
+                      </button>
+                      <button
+                        className="button soft-orange small"
+                        disabled={!studio.audio || recording || busy}
+                        onClick={() => setModal("export")}
+                      >
+                        <ArrowDownToLine size={14} />
+                        Export
+                      </button>
+                    </div>
                   </div>
-                  <div className="session-actions">
-                    <button
-                      className="button subtle small import-button"
-                      disabled={recording || busy}
-                      onClick={openImport}
-                    >
-                      <Upload size={14} />
-                      Import
-                    </button>
-                    <button
-                      className="button subtle small"
-                      disabled={!studio.audio || recording || busy}
-                      onClick={() => {
-                        void studio.saveRecording();
-                      }}
-                    >
-                      <Save size={14} />
-                      Save
-                    </button>
-                    <button
-                      className="button soft-orange small"
-                      disabled={!studio.audio || recording || busy}
-                      onClick={() => setModal("export")}
-                    >
-                      <ArrowDownToLine size={14} />
-                      Export
-                    </button>
-                  </div>
-                </div>
-                <Recorder studio={studio} onImport={openImport} />
-                {studio.processing && (
-                  <div className="processing-line" role="status">
-                    <LoaderCircle size={14} className="spinning" />
-                    Shaping your sound…
-                  </div>
-                )}
+                  <Recorder studio={studio} onImport={openImport} />
+                  {studio.processing && (
+                    <div className="processing-line" role="status">
+                      <LoaderCircle size={14} className="spinning" />
+                      Shaping your sound…
+                    </div>
+                  )}
+                </RecorderDock>
                 <EffectsBrowser studio={studio} effectsRef={effectsRef} />
               </>
             ) : (
@@ -1372,9 +1611,7 @@ export default function App() {
                       studio.settings.trimStart,
                   ),
                 )}{" "}
-                source ·{" "}
-                {PRESETS.find((item) => item.id === studio.settings.presetId)
-                  ?.name || "Original"}
+                source · {effectSummary(studio.settings)}
               </span>
             </div>
           </div>
@@ -1432,9 +1669,9 @@ export default function App() {
               <div>
                 <h3>Find a new character.</h3>
                 <p>
-                  Pick from {PRESETS.length} effects, adjust the controls, and
-                  press Play. Compare Original and With effects anytime. Effects
-                  are applied after recording.
+                  Click an effect to hear it on your recording. Add more to
+                  build a stack of up to 8 effects, then reorder, bypass, or
+                  fine-tune each one. Compare Original and With effects anytime.
                 </p>
               </div>
             </div>
@@ -1444,8 +1681,9 @@ export default function App() {
                 <h3>Keep it. Share it. Make more.</h3>
                 <p>
                   Save a recording to your local library, or export a WAV for
-                  editing and an MP3 for sharing. Use the scissors to trim the
-                  beginning or end.
+                  editing and an MP3 for sharing. Use the scissors, then drag
+                  the waveform edges to trim or its middle to move a selection.
+                  You can also enter exact seconds.
                 </p>
               </div>
             </div>

@@ -11,6 +11,14 @@ import {
   waveformPeaks,
 } from "./audio/utils";
 import { safeFilename } from "./audio/utils";
+import { getEffectChain } from "./audio/chain";
+import {
+  appendEffect,
+  changeEffect,
+  deleteEffect,
+  reorderEffect,
+  resetEffectSettings,
+} from "./effect-settings";
 import { listRecordings, putRecording, removeRecording } from "./storage";
 import type { SavedRecording, Studio } from "./studio-types";
 
@@ -41,6 +49,7 @@ export function useStudio(): Studio {
     ...DEFAULT_SETTINGS,
   });
   const [processing, setProcessing] = useState(false);
+  const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [originalPreview, setOriginalPreview] = useState(false);
@@ -70,6 +79,10 @@ export function useStudio(): Studio {
   const dirty = useRef(false);
   const sessionGeneration = useRef(0);
   const editRevision = useRef(0);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const processedRef = useRef<AudioData | null>(null);
+  const previewAfterRender = useRef(false);
 
   const getContext = useCallback(async () => {
     if (!context.current || context.current.state === "closed")
@@ -78,7 +91,7 @@ export function useStudio(): Studio {
     return context.current;
   }, []);
 
-  const stopPlayback = useCallback(() => {
+  const haltPlayback = useCallback(() => {
     playbackGeneration.current++;
     cancelAnimationFrame(playbackFrame.current);
     if (source.current) {
@@ -93,6 +106,55 @@ export function useStudio(): Studio {
     }
     setPlaying(false);
   }, []);
+
+  const stopPlayback = useCallback(() => {
+    previewAfterRender.current = false;
+    haltPlayback();
+  }, [haltPlayback]);
+
+  const playAudioBuffer = useCallback(
+    async (next: AudioData, offset = 0) => {
+      haltPlayback();
+      const playback = playbackGeneration.current;
+      const ctx = await getContext();
+      if (
+        !mounted.current ||
+        playback !== playbackGeneration.current ||
+        (recorder.current && recorder.current.state !== "inactive")
+      )
+        return;
+      const buffer = ctx.createBuffer(1, next.samples.length, next.sampleRate);
+      buffer.copyToChannel(new Float32Array(next.samples), 0);
+      const node = ctx.createBufferSource();
+      node.buffer = buffer;
+      node.connect(ctx.destination);
+      source.current = node;
+      const position = offset >= buffer.duration ? 0 : Math.max(0, offset);
+      playStarted.current = ctx.currentTime;
+      playOffset.current = position;
+      node.onended = () => {
+        if (source.current !== node) return;
+        source.current = null;
+        node.disconnect();
+        cancelAnimationFrame(playbackFrame.current);
+        setPlaying(false);
+        setPlayhead(0);
+      };
+      node.start(0, position);
+      setPlaying(true);
+      const tick = () => {
+        setPlayhead(
+          Math.min(
+            buffer.duration,
+            playOffset.current + ctx.currentTime - playStarted.current,
+          ),
+        );
+        playbackFrame.current = requestAnimationFrame(tick);
+      };
+      playbackFrame.current = requestAnimationFrame(tick);
+    },
+    [getContext, haltPlayback],
+  );
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -156,9 +218,10 @@ export function useStudio(): Studio {
   }, []);
 
   useEffect(() => {
-    stopPlayback();
+    haltPlayback();
     setPlayhead(0);
     setProcessed(null);
+    processedRef.current = null;
     if (!audio) {
       setProcessing(false);
       return;
@@ -171,6 +234,7 @@ export function useStudio(): Studio {
       renderWorker.current = task;
       taskTimeout = window.setTimeout(() => {
         if (!active) return;
+        previewAfterRender.current = false;
         task.terminate();
         setProcessing(false);
         setError("This effect took too long. Try a shorter recording.");
@@ -178,14 +242,26 @@ export function useStudio(): Studio {
       task.onmessage = (event) => {
         clearTimeout(taskTimeout);
         if (!active) return;
-        if (event.data.ok) setProcessed(event.data.audio);
-        else setError(event.data.error);
+        if (event.data.ok) {
+          setProcessed(event.data.audio);
+          processedRef.current = event.data.audio;
+          if (previewAfterRender.current) {
+            previewAfterRender.current = false;
+            void playAudioBuffer(event.data.audio).catch((error) =>
+              setError(message(error)),
+            );
+          }
+        } else {
+          previewAfterRender.current = false;
+          setError(event.data.error);
+        }
         setProcessing(false);
         task.terminate();
       };
       task.onerror = () => {
         clearTimeout(taskTimeout);
         if (!active) return;
+        previewAfterRender.current = false;
         setError(
           "The audio processor could not start. Restart VoiceForge and try again.",
         );
@@ -200,37 +276,124 @@ export function useStudio(): Studio {
       clearTimeout(taskTimeout);
       renderWorker.current?.terminate();
     };
-  }, [audio, settings, stopPlayback]);
+  }, [audio, settings, haltPlayback, playAudioBuffer]);
 
   const updateSettings = useCallback(
     (patch: Partial<StudioSettings>) => {
       dirty.current = Boolean(audio);
       editRevision.current++;
-      setSettings((previous) => {
-        const next = { ...previous, ...patch };
-        const length = audio
-          ? audio.samples.length / audio.sampleRate
-          : MAX_SECONDS;
-        next.trimStart = Math.max(
-          0,
+      if (source.current || previewAfterRender.current)
+        previewAfterRender.current = true;
+      if (audio) {
+        processedRef.current = null;
+        setProcessing(true);
+      }
+      const previous = settingsRef.current;
+      const next = { ...previous, ...patch };
+      if (patch.intensity !== undefined && selectedEffectId)
+        next.effectChain = changeEffect(previous, selectedEffectId, {
+          intensity: patch.intensity,
+        }).effectChain;
+      const length = audio
+        ? audio.samples.length / audio.sampleRate
+        : MAX_SECONDS;
+      next.trimStart = Math.max(
+        0,
+        Math.min(
+          Number.isFinite(next.trimStart) ? next.trimStart : 0,
+          Math.max(0, length - 0.01),
+        ),
+      );
+      if (next.trimEnd !== 0)
+        next.trimEnd = Math.max(
+          next.trimStart + 0.01,
           Math.min(
-            Number.isFinite(next.trimStart) ? next.trimStart : 0,
-            Math.max(0, length - 0.01),
+            Number.isFinite(next.trimEnd) ? next.trimEnd : length,
+            length,
           ),
         );
-        if (next.trimEnd !== 0)
-          next.trimEnd = Math.max(
-            next.trimStart + 0.01,
-            Math.min(
-              Number.isFinite(next.trimEnd) ? next.trimEnd : length,
-              length,
-            ),
-          );
-        return next;
-      });
+      settingsRef.current = next;
+      setSettings(next);
     },
-    [audio],
+    [audio, selectedEffectId],
   );
+
+  const commitEffects = (next: StudioSettings, preview = true) => {
+    if (next === settingsRef.current) return;
+    if (
+      (recorder.current && recorder.current.state !== "inactive") ||
+      exportBusy.current
+    )
+      return;
+    dirty.current = Boolean(audio);
+    editRevision.current++;
+    settingsRef.current = next;
+    processedRef.current = null;
+    previewAfterRender.current = preview && Boolean(audio);
+    if (preview && audio) {
+      setOriginalPreview(false);
+      void getContext().catch((e) => setError(message(e)));
+    }
+    haltPlayback();
+    if (audio) setProcessing(true);
+    setSettings(next);
+  };
+  const selectEffect = (id: string) => {
+    const effect = getEffectChain(settingsRef.current).find(
+      (effect) => effect.id === id,
+    );
+    if (!effect) return;
+    setSelectedEffectId(id);
+    if (!audio) return;
+    setOriginalPreview(false);
+    void getContext().catch((e) => setError(message(e)));
+    if (processedRef.current) {
+      previewAfterRender.current = false;
+      void playAudioBuffer(processedRef.current).catch((e) =>
+        setError(message(e)),
+      );
+    } else previewAfterRender.current = true;
+  };
+  const resetSettings = () => {
+    setSelectedEffectId(null);
+    commitEffects(resetEffectSettings(settingsRef.current));
+  };
+  const addEffect = (presetId: string) => {
+    if (presetId === "original") {
+      resetSettings();
+      return;
+    }
+    try {
+      const result = appendEffect(
+        settingsRef.current,
+        presetId,
+        crypto.randomUUID(),
+      );
+      setSelectedEffectId(result.selectedId);
+      if (result.settings === settingsRef.current)
+        selectEffect(result.selectedId);
+      else commitEffects(result.settings);
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  const removeEffect = (id: string) => {
+    const next = deleteEffect(settingsRef.current, id);
+    if (selectedEffectId === id)
+      setSelectedEffectId(next.effectChain?.at(-1)?.id ?? null);
+    commitEffects(next);
+  };
+  const toggleEffect = (id: string) => {
+    const effect = getEffectChain(settingsRef.current).find(
+      (effect) => effect.id === id,
+    );
+    if (effect)
+      commitEffects(
+        changeEffect(settingsRef.current, id, { enabled: !effect.enabled }),
+      );
+  };
+  const moveEffect = (id: string, direction: -1 | 1) =>
+    commitEffects(reorderEffect(settingsRef.current, id, direction));
 
   const loadAudio = useCallback(
     (
@@ -244,8 +407,15 @@ export function useStudio(): Studio {
       stopPlayback();
       setAudio(next);
       setProcessed(null);
+      processedRef.current = null;
       setName(nextName);
-      setSettings(nextSettings);
+      const migrated = {
+        ...nextSettings,
+        effectChain: getEffectChain(nextSettings),
+      };
+      settingsRef.current = migrated;
+      setSettings(migrated);
+      setSelectedEffectId(migrated.effectChain.at(-1)?.id ?? null);
       setCurrentId(id);
       setPlayhead(0);
       setOriginalPreview(false);
@@ -383,6 +553,7 @@ export function useStudio(): Studio {
           loadAudio(
             next,
             `Recording ${new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+            { ...settingsRef.current, trimStart: 0, trimEnd: 0 },
           );
           setNotice("Take captured. Preview an effect, then save or export.");
         } catch {
@@ -489,41 +660,10 @@ export function useStudio(): Studio {
   };
 
   const startPlaybackAt = async (offset: number) => {
-    const next = originalPreview ? audio : processed;
+    const next = originalPreview ? audio : processedRef.current;
     if (!next || processing || recordingState !== "idle") return;
-    stopPlayback();
-    const playback = playbackGeneration.current;
-    const ctx = await getContext();
-    if (!mounted.current || playback !== playbackGeneration.current) return;
-    const buffer = ctx.createBuffer(1, next.samples.length, next.sampleRate);
-    buffer.copyToChannel(new Float32Array(next.samples), 0);
-    const node = ctx.createBufferSource();
-    node.buffer = buffer;
-    node.connect(ctx.destination);
-    source.current = node;
-    const length = buffer.duration;
-    const position = offset >= length ? 0 : Math.max(0, offset);
-    playStarted.current = ctx.currentTime;
-    playOffset.current = position;
-    node.onended = () => {
-      source.current = null;
-      node.disconnect();
-      cancelAnimationFrame(playbackFrame.current);
-      setPlaying(false);
-      setPlayhead(0);
-    };
-    node.start(0, position);
-    setPlaying(true);
-    const tick = () => {
-      setPlayhead(
-        Math.min(
-          length,
-          playOffset.current + ctx.currentTime - playStarted.current,
-        ),
-      );
-      playbackFrame.current = requestAnimationFrame(tick);
-    };
-    playbackFrame.current = requestAnimationFrame(tick);
+    previewAfterRender.current = false;
+    await playAudioBuffer(next, offset);
   };
 
   const togglePlayback = async () => {
@@ -554,7 +694,10 @@ export function useStudio(): Studio {
         createdAt: existing?.createdAt ?? Date.now(),
         duration: audio.samples.length / audio.sampleRate,
         audio,
-        settings: { ...settings },
+        settings: {
+          ...settingsRef.current,
+          effectChain: getEffectChain(settingsRef.current),
+        },
       };
       await putRecording(take);
       const rows = await listRecordings();
@@ -666,7 +809,10 @@ export function useStudio(): Studio {
     stopPlayback();
     setAudio(null);
     setProcessed(null);
-    setSettings({ ...DEFAULT_SETTINGS });
+    settingsRef.current = { ...DEFAULT_SETTINGS, effectChain: [] };
+    setSettings(settingsRef.current);
+    setSelectedEffectId(null);
+    processedRef.current = null;
     setProcessing(false);
     setName("Untitled recording");
     setCurrentId(null);
@@ -683,6 +829,10 @@ export function useStudio(): Studio {
           new Float32Array(),
       ),
     [originalPreview, audio, processed],
+  );
+  const effectChain = useMemo(() => getEffectChain(settings), [settings]);
+  const selectedEffect = effectChain.find(
+    (effect) => effect.id === selectedEffectId,
   );
   return {
     name,
@@ -713,13 +863,20 @@ export function useStudio(): Studio {
         : audio
           ? audio.samples.length / audio.sampleRate
           : 0,
-    settings,
-    updateSettings,
-    resetSettings: () => {
-      dirty.current = Boolean(audio);
-      editRevision.current++;
-      setSettings({ ...DEFAULT_SETTINGS });
+    settings: {
+      ...settings,
+      presetId: selectedEffect?.presetId ?? "original",
+      intensity: selectedEffect?.intensity ?? 1,
     },
+    updateSettings,
+    effectChain,
+    selectedEffectId,
+    addEffect,
+    selectEffect,
+    removeEffect,
+    toggleEffect,
+    moveEffect,
+    resetSettings,
     processing,
     playing,
     playhead,

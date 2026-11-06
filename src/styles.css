@@ -2545,3 +2545,376 @@ h1 {
   outline-offset: 4px;
   border-radius: 3px;
 }
+
+/* The recorder stays in view while the effects library scrolls underneath it. */
+:root {
+  --topbar-height: 64px;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  height: var(--topbar-height);
+  z-index: 15;
+}
+.recorder-dock-anchor {
+  height: 1px;
+  margin-top: -1px;
+}
+.recorder-dock {
+  position: sticky;
+  top: calc(var(--topbar-height) + 10px);
+  z-index: 10;
+  background: #111113;
+  padding: 8px 0 10px;
+  margin-top: -8px;
+  border-bottom: 1px solid transparent;
+}
+.recorder-dock.is-stuck {
+  border-bottom-color: #49372f;
+  box-shadow:
+    0 14px 22px #08070a80,
+    0 -11px 0 #111113;
+}
+.recorder-dock .waveform {
+  height: 100px;
+}
+.recorder-dock.is-stuck .waveform {
+  height: 66px;
+}
+.recorder-dock.is-stuck .recorder-heading {
+  padding-top: 11px;
+}
+.recorder-dock.is-stuck .recorder-display {
+  padding-top: 11px;
+}
+.recorder-dock.is-stuck .transport {
+  padding-top: 11px;
+  padding-bottom: 11px;
+}
+.recorder-dock.is-stuck .recorder-helper {
+  display: none;
+}
+.recorder-dock.is-stuck .session-toolbar {
+  margin-bottom: 9px;
+}
+.effects-section {
+  scroll-margin-top: 390px;
+}
+.inspector {
+  top: var(--topbar-height);
+  height: calc(100vh - var(--topbar-height));
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.inspector-footer {
+  padding-top: 26px;
+}
+.effect-chain {
+  margin-bottom: 18px;
+}
+.effect-chain-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+.effect-chain-heading > span {
+  font-size: 8px;
+  color: #a7979f;
+  letter-spacing: 1px;
+}
+.effect-chain-heading b {
+  font-weight: 400;
+  color: #76666e;
+  margin-left: 5px;
+}
+.effect-chain-heading .text-button {
+  font-size: 8px;
+}
+.effect-chain-empty {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 13px 10px;
+  font-size: 9px;
+  color: #927e89;
+  border: 1px dashed #4b3844;
+  border-radius: 5px;
+}
+.effect-chain-empty > svg {
+  color: #b38c72;
+}
+.effect-chain-list {
+  margin: 0;
+  padding: 0 3px 0 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 225px;
+  overflow-y: auto;
+}
+.effect-chain-item {
+  border: 1px solid #3a3038;
+  border-radius: 5px;
+  background: #1d181d;
+  padding: 6px 7px 5px;
+}
+.effect-chain-item.selected {
+  border-color: #b47c58;
+  background: #a46a4113;
+}
+.effect-chain-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.effect-chain-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
+  text-align: left;
+}
+.effect-chain-select > span {
+  font-family: Consolas, monospace;
+  font-size: 8px;
+  color: #ad7e5e;
+}
+.effect-chain-select > strong {
+  font-size: 10px;
+  font-weight: 500;
+  color: #d2b6a4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.effect-chain-item.bypassed .effect-chain-select > strong {
+  color: #7c6976;
+  text-decoration: line-through;
+}
+.chain-power {
+  height: 23px;
+  width: 23px;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #80657a;
+}
+.chain-power.enabled {
+  color: #c3ce8a;
+  background: #a9b06f0a;
+}
+.chain-power:hover:not(:disabled) {
+  background: #ffffff09;
+}
+.effect-chain-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 19px;
+}
+.effect-chain-actions > span {
+  font-size: 7px;
+  color: #886d7e;
+  margin-right: auto;
+}
+.effect-chain-actions > button {
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9a7d8c;
+  border-radius: 3px;
+}
+.effect-chain-actions > button:hover:not(:disabled) {
+  color: #f3b08a;
+  background: #ffffff08;
+}
+.effect-chain-actions > button:disabled {
+  opacity: 0.18;
+}
+.effect-chain-actions > .chain-remove {
+  margin-left: 3px;
+  color: #ad827d;
+}
+.effect-chain-order {
+  font-size: 7px;
+  color: #705c6b;
+  padding: 7px 0 0;
+}
+.effect-card.in-chain:not(.selected) {
+  border-color: #665546;
+}
+.effect-card.in-chain:not(.selected) .effect-applied {
+  color: #aaac80;
+}
+.effect-tabs {
+  overflow-x: auto;
+}
+.effect-tabs > button {
+  flex-shrink: 0;
+}
+
+/* The source timeline is never shortened while its selection is being edited. */
+.waveform.is-trimming {
+  overflow: visible;
+}
+.trim-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  touch-action: none;
+  user-select: none;
+}
+.trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #100b12a6;
+}
+.trim-shade-left {
+  left: 0;
+}
+.trim-shade-right {
+  right: 0;
+}
+.trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-top: 1px solid #dda575;
+  border-bottom: 1px solid #dda575;
+  background: #d5985a10;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  outline-offset: -3px;
+}
+.trim-selection-label {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  color: #b69276;
+  letter-spacing: 1.2px;
+  font-size: 6px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.trim-overlay.is-dragging .trim-selection {
+  cursor: grabbing;
+}
+.trim-handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 13px;
+  transform: translateX(-50%);
+  border: 1px solid #ffc494;
+  background: #d89d6b;
+  color: #45301d;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+  box-shadow: 0 1px 4px #0005;
+  z-index: 2;
+}
+.trim-handle > svg {
+  pointer-events: none;
+}
+.trim-handle > span {
+  position: absolute;
+  bottom: 5px;
+  background: #241918ed;
+  border: 1px solid #9b6944;
+  border-radius: 3px;
+  padding: 2px 4px;
+  color: #e0b38e;
+  font-size: 7px;
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.trim-handle-start > span {
+  left: 17px;
+}
+.trim-handle-end > span {
+  right: 17px;
+}
+.trim-controls {
+  gap: 10px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.trim-heading > span {
+  font-size: 8px;
+}
+.trim-controls > p {
+  font-size: 8px;
+}
+.trim-controls input {
+  padding: 4px 5px;
+}
+
+@media (max-width: 1050px) {
+  .effect-tabs > button {
+    padding-left: 7px;
+    padding-right: 7px;
+    flex: 0 0 auto;
+  }
+  .recorder-dock .waveform {
+    height: 90px;
+  }
+  .recorder-dock.is-stuck .waveform {
+    height: 60px;
+  }
+  .inspector {
+    min-height: 0;
+  }
+}
+@media (max-height: 750px) {
+  .recorder-dock .waveform {
+    height: 80px;
+  }
+  .recorder-dock.is-stuck .waveform {
+    height: 55px;
+  }
+  .recorder-dock .recorder-heading {
+    padding-top: 12px;
+  }
+  .recorder-dock .recorder-display {
+    padding-top: 12px;
+  }
+  .recorder-dock .transport {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .inspector .selected-preset {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+  }
+  .selected-preset-top > .effect-icon {
+    margin-bottom: 9px;
+  }
+  .effect-chain-list {
+    max-height: 185px;
+  }
+  .effects-section {
+    scroll-margin-top: 350px;
+  }
+}

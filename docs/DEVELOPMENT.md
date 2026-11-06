@@ -24,7 +24,9 @@ Use `npm audit` before a release, investigate advisories against the actual exec
 
 The version-scoped minimatch override upgrades only versions 7 through 11.0.0 to 11.0.1 to resolve GHSA-g3hv-75wg-m249 in packaging dependencies. Older minimatch consumers retain compatible versions. Verify packaging as well as tests when changing this override.
 
-`npm run test:desktop` runs native integration checks using Chromium's synthetic microphone and an isolated temporary profile. It checks recording, pause/resume, playback, persistence, both native exports, and independent decoding of both files. It does not capture the physical microphone or modify normal saved takes.
+`npm run test:desktop` runs native integration checks using Chromium's synthetic microphone and an isolated temporary profile. Build current assets with `npm run build` first. It checks recording, pause/resume, persistence, both native exports, and independent decoding of both files. It does not capture the physical microphone or modify normal saved takes.
+
+The native feature scenarios in `scripts/feature-checks.cjs` also check the 90-preset total and exactly 30 Rap presets, automatic previews, rapid selection, ordered effect slots, bypass/removal/reordering, saved chains and legacy sessions, mouse-driven source trimming with numeric synchronization, and sticky waveform positioning while scrolling. A test-only audio-source probe records source starts and active nodes; this catches overlapping players and verifies that Stop cancels a queued automatic preview. The production application does not install that probe.
 
 ## Verification and packaging
 
@@ -38,11 +40,12 @@ npm run package
 Before distributing a release, test the built Electron application itself:
 
 1. Record microphone audio, pause/resume, stop, and replay.
-2. Compare the original with several effects, including pitch correction and a reverb tail.
-3. Save a take, close and reopen the app, and reopen the saved take.
-4. Export WAV and MP3, cancel the save dialog, and export again.
-5. Play both files in an independent audio player.
-6. Verify the microphone is released after recording stops.
+2. Click several presets quickly. Confirm only the latest completed chain plays, and confirm Stop cancels a preview while it is processing.
+3. Stack Demon and Cathedral, bypass one slot, reorder them, and adjust their intensities independently. Save, close and reopen the app, and verify the rack is restored.
+4. Drag both trim edges and the selection, then type exact seconds. Confirm the handles stay on the source timeline even when effects add a tail. Scroll through the library with the waveform still visible.
+5. Export WAV and MP3, cancel the save dialog, and export again.
+6. Play both files in an independent audio player.
+7. Verify the microphone is released after recording stops.
 
 Unit tests check application logic and security boundaries. They cannot prove physical microphone quality, Windows privacy settings, or perceived effect quality. The portable executable currently has no signing certificate; signing and automated updates are separate distribution work.
 

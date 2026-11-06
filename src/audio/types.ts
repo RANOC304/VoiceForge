@@ -3,7 +3,7 @@ export interface AudioData {
   sampleRate: number;
 }
 export type EffectCategory =
-  "Essentials" | "Characters" | "Spaces" | "Musical" | "Creative";
+  "Essentials" | "Characters" | "Spaces" | "Musical" | "Creative" | "Rap";
 export interface EffectRecipe {
   pitch?: number;
   reverb?: number;
@@ -37,6 +37,8 @@ export interface EffectPreset {
   tags: string[];
 }
 export interface StudioSettings {
+  /** Absent in saved sessions from 1.0; migrate the legacy presetId on use. */
+  effectChain?: EffectInstance[];
   presetId: string;
   intensity: number;
   pitch: number;
@@ -48,6 +50,12 @@ export interface StudioSettings {
   trimEnd: number;
   tuningKey: number;
   tuningScale: "chromatic" | "major" | "minor";
+}
+export interface EffectInstance {
+  id: string;
+  presetId: string;
+  intensity: number;
+  enabled: boolean;
 }
 export const DEFAULT_SETTINGS: StudioSettings = {
   presetId: "original",

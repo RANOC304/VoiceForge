@@ -4,11 +4,11 @@ A Windows voice recording studio. Record a take, choose a voice effect, adjust i
 
 ## Use the app
 
-Open `VoiceForge-1.0.0-Windows.exe` from the `release` folder. The portable app needs no installer. The executable is unsigned, so Windows may show its standard unknown-publisher prompt.
+Open the `VoiceForge-<version>-Windows.exe` executable from the `release` folder. The portable app needs no installer. The executable is unsigned, so Windows may show its standard unknown-publisher prompt.
 
 1. Choose your microphone, then press **Record**. Pause and resume within the same take, or stop when finished.
-2. Choose an effect from the library. Search or filter the categories to find character voices, spaces, musical effects, and creative treatments.
-3. Play the result. Compare it with the original, adjust effect strength and pitch, or trim the beginning and end.
+2. Click an effect to hear it automatically. Search or filter the 90 presets, including 30 in the Rap category. Each new choice adds a slot to your effect chain.
+3. Stack up to eight effects, adjust a selected slot's strength, and compare the result with the original. Drag the waveform's trim handles or type exact start and end times.
 4. Save the take to your local recording library, or export a WAV or MP3 to a folder you choose.
 
 You can also import an existing audio file or try the synthetic sound demo before recording.
@@ -17,7 +17,13 @@ Takes can be up to 10 minutes. Imported files must be under 100 MB. VoiceForge m
 
 ## Effects
 
-The preset library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. Presets combine actual audio processing; they are not cloud voice models.
+The 90-preset library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. Its Rap category contains 30 vocal treatments. Presets combine actual audio processing; they are not cloud voice models.
+
+The effect rack holds up to eight slots in the order they process your voice. For example, add **Demon**, then **Cathedral** to place the character voice in a large reverberant space. Select a slot to adjust its intensity, use its bypass button to compare without deleting it, or move it up or down to change the processing order. Removing a slot leaves the others in place. Clicking a preset already in your rack selects that slot and replays the current chain without adding a duplicate. **Original** clears the rack and shared adjustments.
+
+Preset and rack changes automatically preview the finished result from the beginning after processing. Clicking quickly through choices cancels older renders; playback uses the latest chain. **Stop** also cancels a preview that is still processing. The waveform remains visible as you scroll through the effect library.
+
+Trimming uses the original recording's timeline. Drag either edge to shorten the kept section, drag the selection to move it, or enter exact seconds. Reverb and echo can add a tail after that section, but do not move the source trim handles. Saved takes retain the full original audio, trim, ordered effect slots, intensities, and bypass states. Sessions saved before effect chains were introduced reopen with their previous preset in one slot.
 
 The pitch correction effect is a lightweight creative auto-tune effect for a single voice. Choose a key and scale for musical material. Noisy recordings, breathy speech, chords, and multiple speakers can cause pitch-detection artifacts. It is not the Antares Auto-Tune product. Extreme pitch and distortion settings are intentionally stylized.
 

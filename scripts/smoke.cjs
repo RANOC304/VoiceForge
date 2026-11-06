@@ -7,6 +7,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const assert = require("node:assert/strict");
+const features = require("./feature-checks.cjs");
 const output = path.join(os.tmpdir(), "voiceforge-desktop-smoke-" + Date.now());
 app.setPath("userData", path.join(output, "profile"));
 app.commandLine.appendSwitch("use-fake-device-for-media-stream");
@@ -44,7 +45,7 @@ async function button(text) {
 }
 const settle = () =>
   waitFor(
-    `!document.querySelector('.processing-line') && document.querySelector('[aria-label="Play audio"]:not(:disabled)')`,
+    `!document.querySelector('.processing-line') && document.querySelector('[aria-label="Play audio"]:not(:disabled), [aria-label="Pause playback"]:not(:disabled)')`,
   );
 
 app
@@ -57,13 +58,18 @@ app
       else window.webContents.once("did-finish-load", resolve);
     });
     await waitFor(`document.querySelector('[aria-label="Recording name"]')`);
-    assert.equal(await evaluate(`window.voiceforge.version`), "1.0.0");
+    assert.equal(
+      await evaluate(`window.voiceforge.version`),
+      require("../package.json").version,
+    );
+    await features.installAudioProbe(evaluate);
+    const featureApi = { evaluate, waitFor, click, button, window, settle };
     await button("Try a sound demo");
     await settle();
-    await click('[aria-label="Apply Demon"]');
-    await settle();
-    await click('[aria-label="Play audio"]');
-    await waitFor(`document.querySelector('[aria-label="Pause playback"]')`);
+    await features.testEffects(featureApi);
+    await features.testQueuedStop(featureApi);
+    await features.testTrim(featureApi);
+    await features.testSticky(featureApi);
     await click('[aria-label="Stop playback"]');
     await button("Save");
     await waitFor(
@@ -94,23 +100,20 @@ app
         `(async()=>{const ctx=new AudioContext();try{const b=await ctx.decodeAudioData(new Uint8Array(${JSON.stringify(values)}).buffer);return b.duration;}finally{await ctx.close();}})()`,
       );
       assert.ok(
-        duration > 6 && duration < 15,
+        duration > 6 && duration < 30,
         "Encoded file decodes with the effect tail",
       );
     }
+    await features.seedLegacy(evaluate);
     window.webContents.reload();
     await waitFor(
-      `document.querySelector('[aria-label="My recordings"] .nav-count')?.textContent==='1'`,
+      `document.querySelector('[aria-label="My recordings"] .nav-count')?.textContent==='2'`,
     );
-    await click('[aria-label="My recordings"]');
-    await button("Open");
-    await settle();
-    assert.equal(
-      await evaluate(
-        `document.querySelector('[aria-label="Apply Demon"]').getAttribute('aria-pressed')`,
-      ),
-      "true",
-    );
+    await features.installAudioProbe(evaluate);
+    await features.openSaved(featureApi, "Sound demo");
+    await features.assertSavedChain(featureApi);
+    await features.assertLegacy(featureApi);
+    await features.openSaved(featureApi, "Sound demo");
     // The fake Chromium microphone still traverses our real audio-only permission handlers.
     await button("Record");
     await waitFor(`document.querySelector('[title="Pause recording"]')`);
@@ -132,8 +135,14 @@ app
         checks: [
           "native preload",
           "demo",
-          "demon processing",
-          "playback",
+          "90 presets and exactly 30 Rap presets",
+          "automatic effect preview after the latest render",
+          "rapid preset selection without overlapping players",
+          "explicit Stop cancels a pending automatic preview",
+          "stack, reselect, bypass, remove, reorder effects",
+          "source waveform mouse trim and numeric synchronization",
+          "sticky waveform while browsing effects",
+          "saved effect chain reload and legacy migration",
           "WAV native export and decode",
           "MP3 native export and decode",
           "saved session reload",
@@ -153,4 +162,4 @@ app
 setTimeout(() => {
   console.error("Desktop smoke test timed out.");
   app.exit(1);
-}, 90000).unref();
+}, 180000).unref();
