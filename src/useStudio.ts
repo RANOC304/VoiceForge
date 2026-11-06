@@ -12,6 +12,7 @@ import {
 } from "./audio/utils";
 import { safeFilename } from "./audio/utils";
 import { getEffectChain } from "./audio/chain";
+import { makeEffectPreviewSettings } from "./effect-preview";
 import {
   appendEffect,
   changeEffect,
@@ -50,6 +51,8 @@ export function useStudio(): Studio {
   });
   const [processing, setProcessing] = useState(false);
   const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
+  const [previewPresetId, setPreviewPresetId] = useState<string | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [originalPreview, setOriginalPreview] = useState(false);
@@ -83,6 +86,14 @@ export function useStudio(): Studio {
   settingsRef.current = settings;
   const processedRef = useRef<AudioData | null>(null);
   const previewAfterRender = useRef(false);
+  const previewPresetRef = useRef<string | null>(null);
+  const renderSettings = useMemo(
+    () =>
+      previewPresetId
+        ? makeEffectPreviewSettings(settings, previewPresetId)
+        : settings,
+    [settings, previewPresetId, previewRevision],
+  );
 
   const getContext = useCallback(async () => {
     if (!context.current || context.current.state === "closed")
@@ -111,6 +122,11 @@ export function useStudio(): Studio {
     previewAfterRender.current = false;
     haltPlayback();
   }, [haltPlayback]);
+
+  const cancelAudition = useCallback(() => {
+    previewPresetRef.current = null;
+    setPreviewPresetId(null);
+  }, []);
 
   const playAudioBuffer = useCallback(
     async (next: AudioData, offset = 0) => {
@@ -268,7 +284,11 @@ export function useStudio(): Studio {
         setProcessing(false);
         task.terminate();
       };
-      task.postMessage({ operation: "render", audio, settings });
+      task.postMessage({
+        operation: "render",
+        audio,
+        settings: renderSettings,
+      });
     }, 140);
     return () => {
       active = false;
@@ -276,10 +296,11 @@ export function useStudio(): Studio {
       clearTimeout(taskTimeout);
       renderWorker.current?.terminate();
     };
-  }, [audio, settings, haltPlayback, playAudioBuffer]);
+  }, [audio, renderSettings, haltPlayback, playAudioBuffer]);
 
   const updateSettings = useCallback(
     (patch: Partial<StudioSettings>) => {
+      cancelAudition();
       dirty.current = Boolean(audio);
       editRevision.current++;
       if (source.current || previewAfterRender.current)
@@ -315,7 +336,7 @@ export function useStudio(): Studio {
       settingsRef.current = next;
       setSettings(next);
     },
-    [audio, selectedEffectId],
+    [audio, selectedEffectId, cancelAudition],
   );
 
   const commitEffects = (next: StudioSettings, preview = true) => {
@@ -325,6 +346,7 @@ export function useStudio(): Studio {
       exportBusy.current
     )
       return;
+    cancelAudition();
     dirty.current = Boolean(audio);
     editRevision.current++;
     settingsRef.current = next;
@@ -343,6 +365,11 @@ export function useStudio(): Studio {
       (effect) => effect.id === id,
     );
     if (!effect) return;
+    if (previewPresetRef.current) {
+      cancelAudition();
+      processedRef.current = null;
+      if (audio) setProcessing(true);
+    }
     setSelectedEffectId(id);
     if (!audio) return;
     setOriginalPreview(false);
@@ -395,6 +422,52 @@ export function useStudio(): Studio {
   const moveEffect = (id: string, direction: -1 | 1) =>
     commitEffects(reorderEffect(settingsRef.current, id, direction));
 
+  const previewEffect = (presetId: string) => {
+    if (
+      exportBusy.current ||
+      acquiring.current ||
+      (recorder.current && recorder.current.state !== "inactive")
+    )
+      return;
+    try {
+      makeEffectPreviewSettings(settingsRef.current, presetId);
+      const same = previewPresetRef.current === presetId;
+      previewPresetRef.current = presetId;
+      setPreviewPresetId(presetId);
+      setOriginalPreview(false);
+      if (!audio) return;
+      void getContext().catch((e) => setError(message(e)));
+      if (same && processedRef.current) {
+        previewAfterRender.current = false;
+        void playAudioBuffer(processedRef.current).catch((e) =>
+          setError(message(e)),
+        );
+      } else {
+        setPreviewRevision((revision) => revision + 1);
+        processedRef.current = null;
+        previewAfterRender.current = true;
+        haltPlayback();
+        setPlayhead(0);
+        setProcessing(true);
+      }
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  const clearEffectPreview = () => {
+    if (!previewPresetRef.current) return;
+    cancelAudition();
+    processedRef.current = null;
+    haltPlayback();
+    setPlayhead(0);
+    previewAfterRender.current = Boolean(audio);
+    setOriginalPreview(false);
+    if (audio) {
+      setProcessing(true);
+      void getContext().catch((e) => setError(message(e)));
+    }
+  };
+
   const loadAudio = useCallback(
     (
       next: AudioData,
@@ -405,6 +478,7 @@ export function useStudio(): Studio {
       sessionGeneration.current++;
       editRevision.current++;
       stopPlayback();
+      cancelAudition();
       setAudio(next);
       setProcessed(null);
       processedRef.current = null;
@@ -422,7 +496,7 @@ export function useStudio(): Studio {
       setError(null);
       dirty.current = id === null;
     },
-    [stopPlayback],
+    [stopPlayback, cancelAudition],
   );
 
   const canReplace = () =>
@@ -727,26 +801,53 @@ export function useStudio(): Studio {
     setExporting(true);
     setError(null);
     try {
-      const data = await new Promise<ArrayBuffer>((resolve, reject) => {
-        const task = worker();
-        encodingWorker.current = task;
-        const timeout = window.setTimeout(() => {
-          task.terminate();
-          reject(new Error("Encoding took too long. Try a shorter recording."));
-        }, 120000);
-        task.onmessage = (event) => {
-          clearTimeout(timeout);
-          task.terminate();
-          if (event.data.ok) resolve(event.data.data);
-          else reject(new Error(event.data.error));
-        };
-        task.onerror = () => {
-          clearTimeout(timeout);
-          task.terminate();
-          reject(new Error("Audio export failed. Please try again."));
-        };
-        task.postMessage({ operation: format, audio: processed, bitrate });
-      });
+      const task = worker();
+      encodingWorker.current = task;
+      const runExportTask = (request: {
+        operation: "render" | "wav" | "mp3";
+        audio: AudioData;
+        settings?: StudioSettings;
+        bitrate?: number;
+      }) =>
+        new Promise<{ audio?: AudioData; data?: ArrayBuffer }>(
+          (resolve, reject) => {
+            const timeout = window.setTimeout(() => {
+              task.terminate();
+              reject(
+                new Error(
+                  "Audio export took too long. Try a shorter recording.",
+                ),
+              );
+            }, 120000);
+            task.onmessage = (event) => {
+              clearTimeout(timeout);
+              if (event.data.ok) resolve(event.data);
+              else reject(new Error(event.data.error));
+            };
+            task.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("Audio export failed. Please try again."));
+            };
+            task.postMessage(request);
+          },
+        );
+      // An audition is never committed to an export: render the applied stack instead.
+      const outputAudio = previewPresetRef.current
+        ? (
+            await runExportTask({
+              operation: "render",
+              audio: audio!,
+              settings: settingsRef.current,
+            })
+          ).audio
+        : processed;
+      if (!outputAudio)
+        throw new Error("The applied effect stack could not be rendered.");
+      const data = (
+        await runExportTask({ operation: format, audio: outputAudio, bitrate })
+      ).data;
+      if (!data) throw new Error("No audio was encoded. Please try again.");
+      task.terminate();
       const filename = safeFilename(name, format);
       if (window.voiceforge) {
         const result = await window.voiceforge.saveAudio({
@@ -775,6 +876,7 @@ export function useStudio(): Studio {
     } catch (e) {
       setError(message(e));
     } finally {
+      encodingWorker.current?.terminate();
       exportBusy.current = false;
       setExporting(false);
     }
@@ -807,6 +909,7 @@ export function useStudio(): Studio {
     sessionGeneration.current++;
     editRevision.current++;
     stopPlayback();
+    cancelAudition();
     setAudio(null);
     setProcessed(null);
     settingsRef.current = { ...DEFAULT_SETTINGS, effectChain: [] };
@@ -872,6 +975,9 @@ export function useStudio(): Studio {
     effectChain,
     selectedEffectId,
     addEffect,
+    previewEffect,
+    previewPresetId,
+    clearEffectPreview,
     selectEffect,
     removeEffect,
     toggleEffect,
@@ -883,6 +989,11 @@ export function useStudio(): Studio {
     originalPreview,
     setOriginalPreview: (value) => {
       stopPlayback();
+      if (previewPresetRef.current) {
+        cancelAudition();
+        processedRef.current = null;
+        if (audio) setProcessing(true);
+      }
       setPlayhead(0);
       setOriginalPreview(value);
     },

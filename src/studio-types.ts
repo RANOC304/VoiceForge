@@ -30,6 +30,9 @@ export interface Studio {
   effectChain: EffectInstance[];
   selectedEffectId: string | null;
   addEffect: (presetId: string) => void;
+  previewEffect: (presetId: string) => void;
+  previewPresetId: string | null;
+  clearEffectPreview: () => void;
   selectEffect: (id: string) => void;
   removeEffect: (id: string) => void;
   toggleEffect: (id: string) => void;

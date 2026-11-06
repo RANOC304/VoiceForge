@@ -370,6 +370,22 @@ function Recorder({
   }, [studio.audio]);
   return (
     <section className="recorder-panel" aria-label="Voice recorder">
+      {studio.previewPresetId && (
+        <div className="effect-preview-banner" role="status">
+          <Headphones size={15} />
+          <div>
+            <strong>
+              Previewing{" "}
+              {PRESETS.find((preset) => preset.id === studio.previewPresetId)
+                ?.name || "effect"}
+            </strong>
+            <span>Not added to stack</span>
+          </div>
+          <button className="text-button" onClick={studio.clearEffectPreview}>
+            Back to stack <ArrowRight size={12} />
+          </button>
+        </div>
+      )}
       <div className="recorder-heading">
         <div className="panel-title">
           <span className="tiny-orange-dot" />
@@ -753,7 +769,8 @@ function EffectsBrowser({
             <span className="count-pill">{PRESETS.length} effects</span>
           </h2>
           <p>
-            Click to add and hear it. Stack up to 8 effects in your own order.
+            Click any effect to preview. Add to stack only when you want to keep
+            it.
           </p>
         </div>
         <div className="effects-art" aria-hidden="true">
@@ -796,9 +813,7 @@ function EffectsBrowser({
           const instance = studio.effectChain.find(
             (item) => item.presetId === preset.id,
           );
-          const selected = instance
-            ? instance.id === studio.selectedEffectId
-            : preset.id === "original" && !studio.effectChain.length;
+          const selected = studio.previewPresetId === preset.id;
           return (
             <div
               key={preset.id}
@@ -816,20 +831,10 @@ function EffectsBrowser({
               <button
                 className="effect-main"
                 disabled={disabled}
-                onClick={() =>
-                  preset.id === "original"
-                    ? studio.resetSettings()
-                    : studio.addEffect(preset.id)
-                }
-                aria-pressed={Boolean(instance) || selected}
-                aria-label={`Apply ${preset.name}`}
-                title={
-                  preset.id === "original"
-                    ? "Clear effects and return to original"
-                    : instance
-                      ? "Select and preview this effect in your stack"
-                      : "Add to your effect stack and preview"
-                }
+                onClick={() => studio.previewEffect(preset.id)}
+                aria-pressed={selected}
+                aria-label={`Preview ${preset.name}`}
+                title="Preview this effect without changing your stack"
               >
                 <span className="effect-icon">
                   <PresetIcon preset={preset} />
@@ -840,19 +845,44 @@ function EffectsBrowser({
                   <span>{preset.category}</span>
                   {selected || instance ? (
                     <span className="effect-applied">
-                      <Check size={12} />
-                      {selected ? "SELECTED" : "ADDED"}
+                      {selected ? (
+                        <Headphones size={12} />
+                      ) : (
+                        <Check size={12} />
+                      )}
+                      {selected ? "PREVIEW" : "IN STACK"}
                     </span>
                   ) : (
-                    <Plus size={14} />
+                    <Play size={12} />
                   )}
                 </span>
               </button>
+              {preset.id !== "original" && (
+                <button
+                  className={`effect-add-button ${instance ? "is-added" : ""}`}
+                  aria-label={`Add ${preset.name} to stack`}
+                  disabled={
+                    disabled ||
+                    Boolean(instance) ||
+                    studio.effectChain.length >= 8
+                  }
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    studio.addEffect(preset.id);
+                  }}
+                >
+                  {instance ? <Check size={12} /> : <Plus size={12} />}
+                  {instance ? "Added" : "Add to stack"}
+                </button>
+              )}
               <button
                 className={`favorite-button ${favorites.includes(preset.id) ? "is-favorite" : ""}`}
                 aria-label={`${favorites.includes(preset.id) ? "Unfavorite" : "Favorite"} ${preset.name}`}
                 aria-pressed={favorites.includes(preset.id)}
-                onClick={() => toggleFavorite(preset.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleFavorite(preset.id);
+                }}
               >
                 <Heart
                   size={14}
@@ -922,7 +952,7 @@ function Inspector({
     <aside className="inspector" aria-label="Effect settings">
       <div className="inspector-heading">
         <SlidersHorizontal size={16} />
-        <span>SOUND CONTROLS</span>
+        <span>YOUR STACK CONTROLS</span>
         <button
           className="icon-button tiny"
           title="Reset all effects"
@@ -1405,7 +1435,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.1.1"}</span>
+            <span>V{window.voiceforge?.version || "1.1.2"}</span>
           </div>
         </div>
       </aside>
@@ -1560,7 +1590,8 @@ export default function App() {
           }}
         >
           <p className="modal-intro">
-            Your current effects and trim are included in the export.
+            Your applied stack and trim are included. A preview is never saved
+            or exported unless you add it to the stack.
           </p>
           <div className="export-format-options">
             <button
@@ -1677,9 +1708,10 @@ export default function App() {
               <div>
                 <h3>Find a new character.</h3>
                 <p>
-                  Click an effect to hear it on your recording. Add more to
-                  build a stack of up to 8 effects, then reorder, bypass, or
-                  fine-tune each one. Compare Original and With effects anytime.
+                  Click any effect card to preview it without changing your
+                  stack. Use its Add to stack button to keep it, or Back to
+                  stack to finish previewing. Stack up to 8 effects, then
+                  reorder, bypass, or fine-tune each one.
                 </p>
               </div>
             </div>

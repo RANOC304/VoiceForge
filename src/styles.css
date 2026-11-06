@@ -1151,6 +1151,8 @@ h1 {
 }
 .effect-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
   background: #1b1a1d;
   border: 1px solid #302c32;
@@ -1172,7 +1174,8 @@ h1 {
 }
 .effect-main {
   display: flex;
-  height: 100%;
+  flex: 1;
+  height: auto;
   flex-direction: column;
   text-align: left;
   padding: 16px 15px 0;
@@ -2757,6 +2760,66 @@ h1 {
 }
 .effect-card.in-chain:not(.selected) .effect-applied {
   color: #aaac80;
+}
+.effect-add-button {
+  position: relative;
+  z-index: 2;
+  margin: 2px 12px 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #b1774f;
+  border-radius: 4px;
+  background: #b1774f16;
+  color: #edb58c;
+  font-size: 9px;
+  font-weight: 550;
+}
+.effect-add-button:hover:not(:disabled) {
+  background: #b1774f30;
+  border-color: #e6a273;
+}
+.effect-add-button.is-added {
+  border-color: #596045;
+  color: #b2bf86;
+  background: #9da76908;
+  opacity: 0.8;
+}
+.effect-preview-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #b8894a13;
+  border-bottom: 1px solid #8d623f55;
+  color: #e4b585;
+  padding: 10px 17px;
+}
+.effect-preview-banner > svg {
+  flex-shrink: 0;
+}
+.effect-preview-banner > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.effect-preview-banner strong {
+  font-size: 10px;
+  font-weight: 550;
+}
+.effect-preview-banner > div > span {
+  font-size: 8px;
+  color: #a48d75;
+}
+.effect-preview-banner .text-button {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 9px;
+}
+.effect-preview-banner .text-button:focus-visible {
+  outline-offset: 5px;
 }
 .effect-tabs {
   overflow-x: auto;

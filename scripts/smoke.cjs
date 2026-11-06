@@ -71,6 +71,7 @@ app
     await features.testTrim(featureApi);
     await features.testSticky(featureApi);
     await click('[aria-label="Stop playback"]');
+    await features.auditionForPersistence(featureApi);
     await button("Save");
     await waitFor(
       `document.querySelector('.toast')?.textContent.includes('saved on this computer')`,
@@ -101,7 +102,7 @@ app
       );
       assert.ok(
         duration > 6 && duration < 30,
-        "Encoded file decodes with the effect tail",
+        "Export uses the actual effect stack with its tail, while the Original audition is only six seconds",
       );
     }
     await features.seedLegacy(evaluate);
@@ -136,8 +137,10 @@ app
           "native preload",
           "demo",
           "90 presets and exactly 30 Rap presets",
-          "automatic effect preview after the latest render",
-          "rapid preset selection without overlapping players",
+          "card border and description audition without stack changes",
+          "separate Add action builds the stack and previews it",
+          "rapid temporary auditions without overlapping players",
+          "saving and exporting the actual stack during Original audition",
           "explicit Stop cancels a pending automatic preview",
           "stack, reselect, bypass, remove, reorder effects",
           "source waveform mouse trim and numeric synchronization",

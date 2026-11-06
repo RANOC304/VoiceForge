@@ -26,7 +26,7 @@ The version-scoped minimatch override upgrades only versions 7 through 11.0.0 to
 
 `npm run test:desktop` runs native integration checks using Chromium's synthetic microphone and an isolated temporary profile. Build current assets with `npm run build` first. It checks recording, pause/resume, persistence, both native exports, and independent decoding of both files. It does not capture the physical microphone or modify normal saved takes.
 
-The native feature scenarios in `scripts/feature-checks.cjs` also check the 90-preset total and exactly 30 Rap presets, automatic previews, rapid selection, ordered effect slots, bypass/removal/reordering, saved chains and legacy sessions, mouse-driven source trimming with numeric synchronization, and sticky waveform positioning while scrolling. A test-only audio-source probe records source starts and active nodes; this catches overlapping players and verifies that Stop cancels a queued automatic preview. The production application does not install that probe.
+The native feature scenarios in `scripts/feature-checks.cjs` also check the 90-preset total and exactly 30 Rap presets, preview-only card borders and descriptions, the separate Add action, rapid auditions, ordered effect slots, bypass/removal/reordering, saved chains and legacy sessions, mouse-driven source trimming with numeric synchronization, and sticky waveform positioning while scrolling. A test-only audio-source probe records source starts, durations, and active nodes; this catches overlapping players and verifies that Stop cancels a queued preview. Saving/exporting while auditioning Original must retain the actual stack; independent decoding distinguishes the dry audition from the applied effect tail. The production application does not install that probe.
 
 ## Verification and packaging
 
@@ -40,8 +40,8 @@ npm run package
 Before distributing a release, test the built Electron application itself:
 
 1. Record microphone audio, pause/resume, stop, and replay.
-2. Click several presets quickly. Confirm only the latest completed chain plays, and confirm Stop cancels a preview while it is processing.
-3. Stack Demon and Cathedral, bypass one slot, reorder them, and adjust their intensities independently. Save, close and reopen the app, and verify the rack is restored.
+2. Click several cards quickly, including Original. Confirm only the latest audition plays and the rack stays unchanged. Confirm Stop cancels a pending preview and Back to stack restores the chain.
+3. Use the separate Add buttons to stack Demon and Cathedral, bypass one slot, reorder them, and adjust their intensities independently. Save while auditioning another preset, close and reopen the app, and verify only the actual rack is restored.
 4. Drag both trim edges and the selection, then type exact seconds. Confirm the handles stay on the source timeline even when effects add a tail. Scroll through the library with the waveform still visible.
 5. Export WAV and MP3, cancel the save dialog, and export again.
 6. Play both files in an independent audio player.

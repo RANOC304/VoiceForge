@@ -7,8 +7,8 @@ A Windows voice recording studio. Record a take, choose a voice effect, adjust i
 Open the `VoiceForge-<version>-Windows.exe` executable from the `release` folder. The portable app needs no installer. The executable is unsigned, so Windows may show its standard unknown-publisher prompt.
 
 1. Choose your microphone, then press **Record**. Pause and resume within the same take, or stop when finished.
-2. Click an effect to hear it automatically. Search or filter the 90 presets, including 30 in the Rap category. Each new choice adds a slot to your effect chain.
-3. Stack up to eight effects, adjust a selected slot's strength, and compare the result with the original. Drag the waveform's trim handles or type exact start and end times.
+2. Click an effect card to audition it. Search or filter the 90 presets, including 30 in the Rap category. Previewing keeps your current stack unchanged.
+3. Use an effect's separate **Add** button to put it in the stack. Combine up to eight effects, adjust a selected slot's strength, and compare the result with the original. Drag the waveform's trim handles or type exact start and end times.
 4. Save the take to your local recording library, or export a WAV or MP3 to a folder you choose.
 
 You can also import an existing audio file or try the synthetic sound demo before recording.
@@ -19,9 +19,11 @@ Takes can be up to 10 minutes. Imported files must be under 100 MB. VoiceForge m
 
 The 90-preset library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. Its Rap category contains 30 vocal treatments. Presets combine actual audio processing; they are not cloud voice models.
 
-The effect rack holds up to eight slots in the order they process your voice. For example, add **Demon**, then **Cathedral** to place the character voice in a large reverberant space. Select a slot to adjust its intensity, use its bypass button to compare without deleting it, or move it up or down to change the processing order. Removing a slot leaves the others in place. Clicking a preset already in your rack selects that slot and replays the current chain without adding a duplicate. **Original** clears the rack and shared adjustments.
+The effect rack holds up to eight slots in the order they process your voice. For example, use **Add** on **Demon**, then **Cathedral** to place the character voice in a large reverberant space. Select a rack slot to adjust its intensity, use its bypass button to compare without deleting it, or move it up or down to change the processing order. Removing a slot leaves the others in place. The Add button cannot duplicate an effect already in your stack.
 
-Preset and rack changes automatically preview the finished result from the beginning after processing. Clicking quickly through choices cancels older renders; playback uses the latest chain. **Stop** also cancels a preview that is still processing. The waveform remains visible as you scroll through the effect library.
+Clicking a card, its description, or pressing Enter on it auditions that single preset using your current source trim and shared controls. This does not add, remove, or reorder stack slots. The **Original** card auditions the source without clearing your stack. **Back to stack** returns to the applied chain. Adding or editing rack slots plays the updated chain automatically.
+
+Clicking quickly through choices cancels older previews; only the latest finished audition plays. **Stop** also cancels an audition that is still processing. The waveform remains visible as you scroll through the effect library. Saving and WAV/MP3 export always use your applied stack, including while you audition another preset.
 
 Trimming uses the original recording's timeline. Drag either edge to shorten the kept section, drag the selection to move it, or enter exact seconds. Reverb and echo can add a tail after that section, but do not move the source trim handles. Saved takes retain the full original audio, trim, ordered effect slots, intensities, and bypass states. Sessions saved before effect chains were introduced reopen with their previous preset in one slot.
 

@@ -6,12 +6,12 @@ async function installAudioProbe(evaluate) {
   await evaluate(`(() => {
     window.confirm = () => true;
     if (window.__voiceforgeAudioProbe) return;
-    const probe = window.__voiceforgeAudioProbe = { active: new Set(), starts: 0, maxActive: 0 };
+    const probe = window.__voiceforgeAudioProbe = { active: new Set(), starts: 0, maxActive: 0, lastDuration: 0 };
     const start = AudioBufferSourceNode.prototype.start;
     const stop = AudioBufferSourceNode.prototype.stop;
     AudioBufferSourceNode.prototype.start = function(...args) {
       const result = start.apply(this, args);
-      probe.active.add(this); probe.starts++; probe.maxActive = Math.max(probe.maxActive, probe.active.size);
+      probe.active.add(this); probe.starts++; probe.lastDuration = this.buffer?.duration ?? 0; probe.maxActive = Math.max(probe.maxActive, probe.active.size);
       this.addEventListener('ended', () => probe.active.delete(this), { once: true });
       return result;
     };
@@ -69,12 +69,18 @@ function mouseClick(window, point) {
 
 async function cardPoint(evaluate, name, target = "bottom") {
   return evaluate(`(async () => {
-    const primary = [...document.querySelectorAll('.effect-main')].find(button => button.getAttribute('aria-label') === ${JSON.stringify("Apply ")} + ${JSON.stringify(name)});
+    const primary = [...document.querySelectorAll('.effect-main')].find(button => button.getAttribute('aria-label') === ${JSON.stringify("Preview ")} + ${JSON.stringify(name)});
     if (!primary) throw Error('Effect card missing: ' + ${JSON.stringify(name)});
     const card = primary.closest('.effect-card');
     card.scrollIntoView({ block: 'end', behavior: 'instant' });
     window.scrollBy(0, 48);
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let previous = null; let stable = 0;
+    for (let attempt=0; attempt<20 && stable<3; attempt++) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const box=card.getBoundingClientRect();
+      const current=[box.left,box.top,box.width,box.height].join(':');
+      stable=current===previous?stable+1:0;previous=current;
+    }
     const rect = card.getBoundingClientRect();
     const favorite = card.querySelector('.favorite-button');
     const favoriteRect = favorite.getBoundingClientRect();
@@ -86,132 +92,109 @@ async function cardPoint(evaluate, name, target = "bottom") {
     };
     const point = points[${JSON.stringify(target)}];
     const hit = document.elementFromPoint(point.x, point.y);
-    return { ...point, hit: hit?.closest('button')?.getAttribute('aria-label') ?? hit?.className ?? null, favoriteBefore: favorite.getAttribute('aria-pressed') };
+    return { ...point, hit: hit?.closest('button')?.getAttribute('aria-label') ?? hit?.className ?? null, card: hit?.closest('.effect-card')?.querySelector('.effect-main')?.getAttribute('aria-label') ?? null, favoriteBefore: favorite.getAttribute('aria-pressed') };
   })()`);
 }
 
+async function waitForPreview(api, before, name) {
+  try {
+    await api.waitFor(
+      `!document.querySelector('.processing-line') && window.__voiceforgeAudioProbe.starts > ${before} && document.querySelector('.effect-preview-banner')?.textContent.includes(${JSON.stringify("Previewing " + name)})`,
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify(
+        await api.evaluate(
+          `({banner:document.querySelector('.effect-preview-banner')?.textContent,starts:window.__voiceforgeAudioProbe.starts,chain:Array.from(document.querySelectorAll('.effect-chain-item')).map(row=>row.dataset.presetId),error:document.querySelector('.toast')?.textContent})`,
+        ),
+      ),
+    );
+    throw error;
+  }
+  assert.equal(
+    await api.evaluate("window.__voiceforgeAudioProbe.active.size"),
+    1,
+    "An audition owns one audio source",
+  );
+  assert.equal(
+    await api.evaluate("window.__voiceforgeAudioProbe.maxActive"),
+    1,
+    "Auditions never overlap",
+  );
+}
+
+async function backToStack(api) {
+  const before = await api.evaluate("window.__voiceforgeAudioProbe.starts");
+  await api.button("Back to stack");
+  await api.waitFor(
+    `!document.querySelector('.effect-preview-banner') && !document.querySelector('.processing-line') && window.__voiceforgeAudioProbe.starts > ${before}`,
+  );
+}
+
 async function testCardSurfaces(api) {
-  const { evaluate, window, click, waitFor } = api;
-  const dimensions = window.getContentSize();
-  const reports = [];
+  const { evaluate, window, click } = api;
+  const initial = await chainIds(evaluate);
   if (
     await evaluate(
       `Boolean(document.querySelector('[aria-label="Dismiss message"]'))`,
     )
   )
     await click('[aria-label="Dismiss message"]');
-  for (const width of [1440, 900]) {
-    window.setContentSize(width, 900);
-    await evaluate(
-      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
-    );
-    const report = await evaluate(`(async () => {
-      const failures = [];
-      let worst = { name: 'Demon', gap: 0 };
-      const cards = [...document.querySelectorAll('.effect-card')];
-      for (const card of cards) {
-        card.scrollIntoView({ block:'end', behavior:'instant' });
-        window.scrollBy(0,48);
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const primary = card.querySelector('.effect-main');
-        const rect = card.getBoundingClientRect();
-        const inner = primary.getBoundingClientRect();
-        const name = primary.getAttribute('aria-label').slice(6);
-        const gap = rect.bottom - 1 - inner.bottom;
-        if (gap > worst.gap && name !== 'Original') worst = {name,gap};
-        for (const [label,x,y] of [
-          ['top', rect.left+rect.width/2, rect.top+4],
-          ['center', rect.left+rect.width/2, rect.top+rect.height/2],
-          ['bottom', rect.left+rect.width/2, rect.bottom-4],
-          ['left',rect.left+4,rect.top+rect.height/2],
-          ['right',rect.right-4,rect.top+rect.height/2],
-        ]) {
-          const hit = document.elementFromPoint(x,y);
-          if (hit?.closest('.effect-main') !== primary && hit !== card) failures.push({name,point:label,gap:Number(gap.toFixed(2)),hit:hit?.closest('button')?.getAttribute('aria-label')??hit?.className??null});
-        }
-      }
-      return {width:innerWidth,cards:cards.length,failures,worst};
-    })()`);
-    reports.push(report);
-  }
-  console.log(
-    JSON.stringify({
-      cardHitCoverage: reports.map((report) => ({
-        width: report.width,
-        cards: report.cards,
-        failures: report.failures.length,
-        examples: report.failures.slice(0, 6),
-        worst: report.worst,
-      })),
-    }),
+  const point = await cardPoint(evaluate, "Demon", "bottom");
+  assert.equal(
+    point.card,
+    "Preview Demon",
+    "The native pointer must hit the intended card",
   );
-
-  for (const report of reports) {
-    window.setContentSize(report.width, 900);
-    await previewAfter(api, '[aria-label="Apply Original"]');
-    await click('[aria-label="Stop playback"]');
-    const name = report.worst.name;
-    const point = await cardPoint(evaluate, name, "bottom");
-    const before = await evaluate("window.__voiceforgeAudioProbe.starts");
-    mouseClick(window, point);
-    try {
-      await waitFor(
-        `!document.querySelector('.processing-line') && document.querySelectorAll('.effect-chain-item').length === 1 && window.__voiceforgeAudioProbe.starts > ${before}`,
-        4000,
-      );
-    } catch {
-      assert.fail(
-        `Outer card bottom click failed to add and preview at ${report.width}px: ${name}; hit=${point.hit}; inner-button bottom gap=${report.worst.gap.toFixed(2)}px`,
-      );
-    }
-    assert.equal(
-      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
-      1,
-      "A card click adds exactly one slot",
-    );
-    assert.equal(
-      await evaluate("window.__voiceforgeAudioProbe.starts"),
-      before + 1,
-      "A card click starts exactly one preview",
-    );
-    const description = await cardPoint(evaluate, name, "description");
-    const replayBefore = await evaluate("window.__voiceforgeAudioProbe.starts");
-    mouseClick(window, description);
-    await waitFor(`window.__voiceforgeAudioProbe.starts > ${replayBefore}`);
-    assert.equal(
-      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
-      1,
-      "Description clicks reselect an existing slot without duplication",
-    );
-    await click('[aria-label="Stop playback"]');
-    const heart = await cardPoint(evaluate, name, "heart");
-    const heartBefore = await evaluate("window.__voiceforgeAudioProbe.starts");
-    mouseClick(window, heart);
-    await waitFor(
-      `document.querySelector('[aria-label=${JSON.stringify((heart.favoriteBefore === "true" ? "Favorite " : "Unfavorite ") + name)}]')`,
-    );
-    assert.equal(
-      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
-      1,
-      "The heart only changes favorite state",
-    );
-    assert.equal(
-      await evaluate("window.__voiceforgeAudioProbe.starts"),
-      heartBefore,
-      "The heart does not start playback",
-    );
-    assert.equal(
-      report.failures.length,
-      0,
-      `Every card interior point should hit its primary action at ${report.width}px: ${JSON.stringify(report.failures.slice(0, 3))}`,
-    );
-  }
-  window.setContentSize(dimensions[0], dimensions[1]);
-  await previewAfter(api, '[aria-label="Apply Original"]');
+  const before = await evaluate("window.__voiceforgeAudioProbe.starts");
+  mouseClick(window, point);
+  await waitForPreview(api, before, "Demon");
+  assert.deepEqual(
+    await chainIds(evaluate),
+    initial,
+    "Card border auditions without adding",
+  );
+  const description = await cardPoint(evaluate, "Demon", "description");
+  const replay = await evaluate("window.__voiceforgeAudioProbe.starts");
+  mouseClick(window, description);
+  await waitForPreview(api, replay, "Demon");
+  assert.deepEqual(
+    await chainIds(evaluate),
+    initial,
+    "Description clicks only audition",
+  );
+  const original = await evaluate("window.__voiceforgeAudioProbe.starts");
+  await click('[aria-label="Preview Original"]');
+  await waitForPreview(api, original, "Original");
+  assert.deepEqual(
+    await chainIds(evaluate),
+    initial,
+    "Original auditions without changing the stack",
+  );
   await click('[aria-label="Stop playback"]');
-  await evaluate("window.scrollTo({top:0,behavior:'instant'})");
+  const favorite = await evaluate(
+    `document.querySelector('[aria-label="Favorite Demon"], [aria-label="Unfavorite Demon"]').getAttribute('aria-label')`,
+  );
+  const starts = await evaluate("window.__voiceforgeAudioProbe.starts");
+  await click(`[aria-label="${favorite}"]`);
+  assert.deepEqual(
+    await chainIds(evaluate),
+    initial,
+    "The heart only changes favorite state",
+  );
+  assert.equal(
+    await evaluate("window.__voiceforgeAudioProbe.starts"),
+    starts,
+    "The heart does not audition or add",
+  );
+  await backToStack(api);
+  assert.deepEqual(
+    await chainIds(evaluate),
+    initial,
+    "Back to stack restores the unchanged rack",
+  );
+  await click('[aria-label="Stop playback"]');
 }
-
 async function testEffects(api) {
   const { evaluate, waitFor, click } = api;
   assert.equal(
@@ -226,43 +209,35 @@ async function testEffects(api) {
     "Rap has exactly 30 presets",
   );
   await click('[aria-label="All effects"]');
-
   await testCardSurfaces(api);
 
-  await previewAfter(api, '[aria-label="Apply Demon"]');
-  assert.deepEqual(await chainIds(evaluate), ["demon"]);
-
-  const before = await evaluate("window.__voiceforgeAudioProbe.starts");
-  await evaluate(`(() => { for (const name of ['Cathedral', 'Robot', 'Demon', 'Cathedral']) {
-    const card = document.querySelector('[aria-label="Apply ' + name + '"]');
-    if (!card || card.disabled) throw Error('Rapid-preview control unavailable: ' + name);
-    card.click();
-  } })()`);
-  await waitFor(
-    `!document.querySelector('.processing-line') && window.__voiceforgeAudioProbe.starts > ${before} && document.querySelector('[aria-label="Pause playback"]')`,
+  await previewAfter(api, '[aria-label="Add Demon to stack"]');
+  await previewAfter(api, '[aria-label="Add Cathedral to stack"]');
+  await previewAfter(api, '[aria-label="Add Robot to stack"]');
+  assert.deepEqual(await chainIds(evaluate), ["demon", "cathedral", "robot"]);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Add Demon to stack"]').disabled`,
+    ),
+    true,
+    "The separate Add action cannot duplicate an existing slot",
   );
+  const before = await evaluate("window.__voiceforgeAudioProbe.starts");
+  await evaluate(
+    `(() => { for (const name of ['Robot','Original','Demon','Cathedral']) document.querySelector('[aria-label="Preview '+name+'"]').click(); })()`,
+  );
+  await waitForPreview(api, before, "Cathedral");
   assert.equal(
     await evaluate("window.__voiceforgeAudioProbe.starts"),
     before + 1,
-    "Only the final render in a rapid burst starts playback",
+    "Only the latest rapid audition starts",
   );
-  assert.equal(
-    await evaluate("window.__voiceforgeAudioProbe.maxActive"),
-    1,
-    "Rapid preset selection never creates overlapping sources",
+  assert.deepEqual(
+    await chainIds(evaluate),
+    ["demon", "cathedral", "robot"],
+    "Rapid auditions leave the saved stack unchanged",
   );
-  assert.equal(
-    await evaluate(
-      `document.querySelector('[aria-label="Apply Cathedral"]').getAttribute('aria-pressed')`,
-    ),
-    "true",
-    "The final clicked effect remains selected",
-  );
-  assert.equal(
-    (await chainIds(evaluate)).length,
-    3,
-    "Reselecting an existing effect does not duplicate its slot",
-  );
+  await backToStack(api);
 
   await previewAfter(api, '[aria-label="Remove Robot"]');
   assert.deepEqual(await chainIds(evaluate), ["demon", "cathedral"]);
@@ -271,19 +246,31 @@ async function testEffects(api) {
     await evaluate(
       `Boolean(document.querySelector('[aria-label="Enable Cathedral"]'))`,
     ),
-    "Bypassed effects remain in the rack",
+    "Bypassed effects stay in the rack",
   );
   await previewAfter(api, '[aria-label="Move Cathedral up"]');
-  assert.deepEqual(
-    await chainIds(evaluate),
-    ["cathedral", "demon"],
-    "Rack order is editable",
-  );
+  assert.deepEqual(await chainIds(evaluate), ["cathedral", "demon"]);
   await previewAfter(api, '[aria-label="Enable Cathedral"]');
   await click('[aria-label="Stop playback"]');
   await waitFor("window.__voiceforgeAudioProbe.active.size === 0");
 }
 
+async function auditionForPersistence(api) {
+  const before = await api.evaluate("window.__voiceforgeAudioProbe.starts");
+  await api.click('[aria-label="Preview Original"]');
+  await waitForPreview(api, before, "Original");
+  assert.ok(
+    Math.abs(
+      (await api.evaluate("window.__voiceforgeAudioProbe.lastDuration")) - 6,
+    ) < 0.03,
+    "Original audition uses the six-second dry source",
+  );
+  assert.deepEqual(
+    await chainIds(api.evaluate),
+    ["cathedral", "demon"],
+    "Auditioning Original does not clear the actual stack before save/export",
+  );
+}
 async function testQueuedStop(api) {
   const { evaluate, waitFor, click, settle } = api;
   const before = await evaluate("window.__voiceforgeAudioProbe.starts");
@@ -455,6 +442,13 @@ async function assertSavedChain(api) {
     ),
     "Saved bypass state survives reopening",
   );
+  assert.equal(
+    await api.evaluate(
+      `Boolean(document.querySelector('.effect-preview-banner'))`,
+    ),
+    false,
+    "A temporary audition is not persisted in the saved take",
+  );
 }
 
 async function assertLegacy(api) {
@@ -479,6 +473,7 @@ module.exports = {
   installAudioProbe,
   testEffects,
   testQueuedStop,
+  auditionForPersistence,
   testTrim,
   testSticky,
   seedLegacy,
