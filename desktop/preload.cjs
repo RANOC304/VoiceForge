@@ -7,7 +7,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "voiceforge",
   Object.freeze({
-    version: "1.1.0",
+    version: "1.1.1",
     saveAudio: (request) =>
       ipcRenderer.invoke("voiceforge:save-audio", {
         name: request?.name,

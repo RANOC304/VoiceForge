@@ -804,6 +804,14 @@ function EffectsBrowser({
               key={preset.id}
               className={`effect-card ${selected ? "selected" : ""} ${instance ? "in-chain" : ""}`}
               style={{ "--effect-color": preset.color } as CSSProperties}
+              onClick={(event) => {
+                // Include the card's border and any space outside its native button.
+                if (event.target === event.currentTarget) {
+                  event.currentTarget
+                    .querySelector<HTMLButtonElement>(".effect-main")
+                    ?.click();
+                }
+              }}
             >
               <button
                 className="effect-main"
@@ -1397,7 +1405,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.1.0"}</span>
+            <span>V{window.voiceforge?.version || "1.1.1"}</span>
           </div>
         </div>
       </aside>

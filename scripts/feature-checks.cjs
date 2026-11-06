@@ -45,6 +45,173 @@ async function chainIds(evaluate) {
   );
 }
 
+function mouseClick(window, point) {
+  window.webContents.sendInputEvent({
+    type: "mouseMove",
+    x: point.x,
+    y: point.y,
+  });
+  window.webContents.sendInputEvent({
+    type: "mouseDown",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  window.webContents.sendInputEvent({
+    type: "mouseUp",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+}
+
+async function cardPoint(evaluate, name, target = "bottom") {
+  return evaluate(`(async () => {
+    const primary = [...document.querySelectorAll('.effect-main')].find(button => button.getAttribute('aria-label') === ${JSON.stringify("Apply ")} + ${JSON.stringify(name)});
+    if (!primary) throw Error('Effect card missing: ' + ${JSON.stringify(name)});
+    const card = primary.closest('.effect-card');
+    card.scrollIntoView({ block: 'end', behavior: 'instant' });
+    window.scrollBy(0, 48);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const rect = card.getBoundingClientRect();
+    const favorite = card.querySelector('.favorite-button');
+    const favoriteRect = favorite.getBoundingClientRect();
+    const description = card.querySelector('.effect-description').getBoundingClientRect();
+    const points = {
+      bottom: { x: Math.round(rect.left + rect.width / 2), y: Math.floor(rect.bottom - 0.25) },
+      description: { x: Math.round(description.left + description.width / 2), y: Math.round(description.top + description.height / 2) },
+      heart: { x: Math.round(favoriteRect.left + favoriteRect.width / 2), y: Math.round(favoriteRect.top + favoriteRect.height / 2) }
+    };
+    const point = points[${JSON.stringify(target)}];
+    const hit = document.elementFromPoint(point.x, point.y);
+    return { ...point, hit: hit?.closest('button')?.getAttribute('aria-label') ?? hit?.className ?? null, favoriteBefore: favorite.getAttribute('aria-pressed') };
+  })()`);
+}
+
+async function testCardSurfaces(api) {
+  const { evaluate, window, click, waitFor } = api;
+  const dimensions = window.getContentSize();
+  const reports = [];
+  if (
+    await evaluate(
+      `Boolean(document.querySelector('[aria-label="Dismiss message"]'))`,
+    )
+  )
+    await click('[aria-label="Dismiss message"]');
+  for (const width of [1440, 900]) {
+    window.setContentSize(width, 900);
+    await evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    const report = await evaluate(`(async () => {
+      const failures = [];
+      let worst = { name: 'Demon', gap: 0 };
+      const cards = [...document.querySelectorAll('.effect-card')];
+      for (const card of cards) {
+        card.scrollIntoView({ block:'end', behavior:'instant' });
+        window.scrollBy(0,48);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const primary = card.querySelector('.effect-main');
+        const rect = card.getBoundingClientRect();
+        const inner = primary.getBoundingClientRect();
+        const name = primary.getAttribute('aria-label').slice(6);
+        const gap = rect.bottom - 1 - inner.bottom;
+        if (gap > worst.gap && name !== 'Original') worst = {name,gap};
+        for (const [label,x,y] of [
+          ['top', rect.left+rect.width/2, rect.top+4],
+          ['center', rect.left+rect.width/2, rect.top+rect.height/2],
+          ['bottom', rect.left+rect.width/2, rect.bottom-4],
+          ['left',rect.left+4,rect.top+rect.height/2],
+          ['right',rect.right-4,rect.top+rect.height/2],
+        ]) {
+          const hit = document.elementFromPoint(x,y);
+          if (hit?.closest('.effect-main') !== primary && hit !== card) failures.push({name,point:label,gap:Number(gap.toFixed(2)),hit:hit?.closest('button')?.getAttribute('aria-label')??hit?.className??null});
+        }
+      }
+      return {width:innerWidth,cards:cards.length,failures,worst};
+    })()`);
+    reports.push(report);
+  }
+  console.log(
+    JSON.stringify({
+      cardHitCoverage: reports.map((report) => ({
+        width: report.width,
+        cards: report.cards,
+        failures: report.failures.length,
+        examples: report.failures.slice(0, 6),
+        worst: report.worst,
+      })),
+    }),
+  );
+
+  for (const report of reports) {
+    window.setContentSize(report.width, 900);
+    await previewAfter(api, '[aria-label="Apply Original"]');
+    await click('[aria-label="Stop playback"]');
+    const name = report.worst.name;
+    const point = await cardPoint(evaluate, name, "bottom");
+    const before = await evaluate("window.__voiceforgeAudioProbe.starts");
+    mouseClick(window, point);
+    try {
+      await waitFor(
+        `!document.querySelector('.processing-line') && document.querySelectorAll('.effect-chain-item').length === 1 && window.__voiceforgeAudioProbe.starts > ${before}`,
+        4000,
+      );
+    } catch {
+      assert.fail(
+        `Outer card bottom click failed to add and preview at ${report.width}px: ${name}; hit=${point.hit}; inner-button bottom gap=${report.worst.gap.toFixed(2)}px`,
+      );
+    }
+    assert.equal(
+      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
+      1,
+      "A card click adds exactly one slot",
+    );
+    assert.equal(
+      await evaluate("window.__voiceforgeAudioProbe.starts"),
+      before + 1,
+      "A card click starts exactly one preview",
+    );
+    const description = await cardPoint(evaluate, name, "description");
+    const replayBefore = await evaluate("window.__voiceforgeAudioProbe.starts");
+    mouseClick(window, description);
+    await waitFor(`window.__voiceforgeAudioProbe.starts > ${replayBefore}`);
+    assert.equal(
+      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
+      1,
+      "Description clicks reselect an existing slot without duplication",
+    );
+    await click('[aria-label="Stop playback"]');
+    const heart = await cardPoint(evaluate, name, "heart");
+    const heartBefore = await evaluate("window.__voiceforgeAudioProbe.starts");
+    mouseClick(window, heart);
+    await waitFor(
+      `document.querySelector('[aria-label=${JSON.stringify((heart.favoriteBefore === "true" ? "Favorite " : "Unfavorite ") + name)}]')`,
+    );
+    assert.equal(
+      await evaluate("document.querySelectorAll('.effect-chain-item').length"),
+      1,
+      "The heart only changes favorite state",
+    );
+    assert.equal(
+      await evaluate("window.__voiceforgeAudioProbe.starts"),
+      heartBefore,
+      "The heart does not start playback",
+    );
+    assert.equal(
+      report.failures.length,
+      0,
+      `Every card interior point should hit its primary action at ${report.width}px: ${JSON.stringify(report.failures.slice(0, 3))}`,
+    );
+  }
+  window.setContentSize(dimensions[0], dimensions[1]);
+  await previewAfter(api, '[aria-label="Apply Original"]');
+  await click('[aria-label="Stop playback"]');
+  await evaluate("window.scrollTo({top:0,behavior:'instant'})");
+}
+
 async function testEffects(api) {
   const { evaluate, waitFor, click } = api;
   assert.equal(
@@ -59,6 +226,8 @@ async function testEffects(api) {
     "Rap has exactly 30 presets",
   );
   await click('[aria-label="All effects"]');
+
+  await testCardSurfaces(api);
 
   await previewAfter(api, '[aria-label="Apply Demon"]');
   assert.deepEqual(await chainIds(evaluate), ["demon"]);
