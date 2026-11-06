@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.ico binary
+third-party/** -text -whitespace
