@@ -7,7 +7,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "voiceforge",
   Object.freeze({
-    version: "1.2.0",
+    version: "1.3.0",
     getPreferences: () => ipcRenderer.invoke("voiceforge:get-preferences"),
     savePreferences: (patch) =>
       ipcRenderer.invoke("voiceforge:save-preferences", patch),

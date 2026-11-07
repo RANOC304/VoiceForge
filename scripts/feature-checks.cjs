@@ -422,7 +422,7 @@ async function testSticky({ evaluate, waitFor }) {
 
 async function seedLegacy(evaluate) {
   await evaluate(`new Promise((resolve,reject)=>{
-    const request=indexedDB.open('voiceforge-studio',1);
+    const request=indexedDB.open('voiceforge-studio');
     request.onerror=()=>reject(request.error);
     request.onsuccess=()=>{
       const db=request.result;const tx=db.transaction('recordings','readwrite');

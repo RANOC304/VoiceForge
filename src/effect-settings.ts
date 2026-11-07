@@ -2,6 +2,41 @@ import { getEffectChain, MAX_EFFECTS } from "./audio/chain";
 import { PRESETS } from "./audio/presets";
 import type { EffectInstance, StudioSettings } from "./audio/types";
 import { DEFAULT_SETTINGS } from "./audio/types";
+import type { StackPreset } from "./studio-types";
+
+export function makeStackPreset(
+  name: string,
+  settings: StudioSettings,
+  id: string,
+): StackPreset {
+  const label = name.trim();
+  if (!label || label.length > 60)
+    throw new Error("Enter a preset name of 1 to 60 characters.");
+  const { trimStart, trimEnd, ...sound } = settings;
+  const effectChain = getEffectChain(settings);
+  if (!effectChain.length)
+    throw new Error("Add an effect before saving the stack.");
+  return { id, name: label, settings: { ...sound, effectChain } };
+}
+
+export function applyStackPreset(
+  current: StudioSettings,
+  preset: StackPreset,
+  nextId: () => string,
+): StudioSettings {
+  const settings = {
+    ...preset.settings,
+    trimStart: current.trimStart,
+    trimEnd: current.trimEnd,
+  };
+  return {
+    ...settings,
+    effectChain: getEffectChain(settings).map((effect) => ({
+      ...effect,
+      id: nextId(),
+    })),
+  };
+}
 
 export function resetEffectSettings(settings: StudioSettings): StudioSettings {
   return {

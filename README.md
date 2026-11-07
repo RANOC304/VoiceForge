@@ -17,11 +17,21 @@ Takes can be up to 10 minutes. Imported files must be under 100 MB. VoiceForge m
 
 In **Settings**, select a default microphone, choose a default export folder, and set the Fast export format. Use **Detect microphones** to load input names. If the saved microphone is unavailable, recording uses the system default. Fast export uses the take's name and adds a numeric suffix if the file already exists.
 
+## Layer tracks
+
+Use **Add track** under the recorder to create another layer. Select a track to record or import its audio, trim it, and apply its own effects. **Clear take** empties the selected track and keeps its stack ready for another take.
+
+Set **Start (s)** to place each trimmed track in the mix. Use **Level %** and **Mute** to balance the tracks, then press **Play mix** to hear them together. Enable **Hear other tracks while recording** to record one microphone layer against the rest of the project. Use headphones to keep the backing tracks out of the microphone.
+
+**Save** stores the whole project in **My recordings**. In **Export**, choose the project mix or the selected track. **Fast export** uses the mix in a multitrack project. A project holds up to eight tracks and 30 minutes of total source audio, with up to ten minutes per track.
+
 ## Effects
 
 The library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. All presets process audio locally.
 
 The effect rack holds up to eight slots in the order they process your voice. For example, use **Add** on **Demon**, then **Cathedral** to place the character voice in a large reverberant space. Select a rack slot to adjust its intensity, use its bypass button to compare without deleting it, or move it up or down to change the processing order. Removing a slot leaves the others in place. The Add button cannot duplicate an effect already in your stack.
+
+Use **Save as preset** in the effect stack to name and reuse your setup. Pick a saved preset and press **Apply** to replace the selected track's stack and sound controls. Presets carry slot order, intensity, and bypass settings. Each track keeps its own trim.
 
 Clicking a card, its description, or pressing Enter on it auditions that single preset using your current source trim and shared controls. This does not add, remove, or reorder stack slots. The **Original** card auditions the source without clearing your stack. **Back to stack** returns to the applied chain. Adding or editing rack slots plays the updated chain automatically.
 

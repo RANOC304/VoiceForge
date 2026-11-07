@@ -7,6 +7,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const assert = require("node:assert/strict");
+const { setTimeout: delay } = require("node:timers/promises");
 const features = require("./feature-checks.cjs");
 const output = path.join(os.tmpdir(), "voiceforge-desktop-smoke-" + Date.now());
 const fastFolder = path.join(output, "fast exports");
@@ -183,19 +184,150 @@ app
     await features.assertSavedChain(featureApi);
     await features.assertLegacy(featureApi);
     await features.openSaved(featureApi, "Sound demo");
+    await button("Save as preset");
+    const setInput = async (label, value) =>
+      evaluate(`(() => {
+      const input = document.querySelector('input[aria-label=' + CSS.escape(${JSON.stringify(label)}) + ']');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await setInput("Preset name", "Dark hook");
+    await button("Save preset");
+    await waitFor(
+      `!document.querySelector('[role="dialog"]') && document.querySelector('[aria-label="Saved stack preset"]').options.length === 2`,
+    );
+    await button("Add track");
+    await waitFor(
+      `document.querySelector('[aria-label="Select track 2"][aria-pressed="true"]')`,
+    );
+    assert.equal(
+      await evaluate(`document.querySelectorAll('.effect-chain-item').length`),
+      0,
+    );
+    await evaluate(`(() => {
+      const select = document.querySelector('[aria-label="Saved stack preset"]');
+      select.value = select.options[1].value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await button("Apply");
+    await features.assertSavedChain(featureApi);
+    await click(".monitor-toggle input");
+    const startsBeforeCapture = await evaluate(
+      "window.__voiceforgeAudioProbe.starts",
+    );
     // The fake Chromium microphone still traverses our real audio-only permission handlers.
     await button("Record");
     await waitFor(`document.querySelector('[title="Pause recording"]')`);
-    await waitFor(
-      `document.querySelector('.time-display')?.textContent.includes('00:01')`,
+    assert.equal(
+      await evaluate("window.__voiceforgeAudioProbe.starts"),
+      startsBeforeCapture + 1,
     );
+    // MediaRecorder runs while a background window's animation frames can pause.
+    await delay(1250);
     await click('[title="Pause recording"]');
     await waitFor(`document.querySelector('[title="Resume recording"]')`);
+    assert.equal(
+      await evaluate("window.__voiceforgeAudioProbe.active.size"),
+      0,
+    );
     await click('[title="Resume recording"]');
     await click('[title="Stop recording"]');
     await settle();
     assert.ok(
       await evaluate(`!document.querySelector('[title="Pause recording"]')`),
+    );
+    assert.equal(
+      await evaluate("window.__voiceforgeAudioProbe.active.size"),
+      0,
+    );
+    await setInput("Start time for track 2", "12");
+    await button("Play mix");
+    await waitFor(
+      `Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Stop mix')`,
+    );
+    assert.ok(
+      (await evaluate("window.__voiceforgeAudioProbe.lastDuration")) > 13,
+    );
+    await button("Stop mix");
+    await button("Save");
+    await waitFor(
+      `document.querySelector('.toast')?.textContent.includes('saved on this computer')`,
+    );
+
+    exportFormat = "wav";
+    await button("Export");
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[aria-label="Export audio from"]').value`,
+      ),
+      "mix",
+    );
+    await click(".export-format-options button:first-child");
+    await button("Export WAV");
+    await waitFor(`!document.querySelector('[role="dialog"]')`);
+    const mixed = await fs.readFile(path.join(output, "voiceforge-test.wav"));
+    assert.ok(mixed.readUInt32LE(40) / 96000 > 13);
+    assert.ok(
+      mixed.subarray(44 + 96000, 44 + 192000).some((sample) => sample !== 0),
+    );
+    assert.ok(mixed.subarray(44 + 12 * 96000).some((sample) => sample !== 0));
+
+    await button("Export");
+    await click(".export-format-options button:first-child");
+    await evaluate(`(() => {
+      const select = document.querySelector('[aria-label="Export audio from"]');
+      select.value = 'track';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await button("Export WAV");
+    await waitFor(`!document.querySelector('[role="dialog"]')`);
+    const solo = await fs.readFile(path.join(output, "voiceforge-test.wav"));
+    assert.ok(solo.readUInt32LE(40) / 96000 < 12);
+
+    window.webContents.reload();
+    await waitFor(
+      `document.querySelector('[aria-label="My recordings"] .nav-count')?.textContent==='2'`,
+    );
+    await features.installAudioProbe(evaluate);
+    await features.openSaved(featureApi, "Sound demo");
+    await waitFor(
+      `document.querySelector('[aria-label="Select track 2"][aria-pressed="true"]')`,
+    );
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[aria-label="Start time for track 2"]').value`,
+      ),
+      "12",
+    );
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[aria-label="Saved stack preset"]').options[1].textContent`,
+      ),
+      "Dark hook",
+    );
+    await click('[aria-label="Clear recording"]');
+    await button("Keep take");
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[aria-label="Clear recording"]').disabled`,
+      ),
+      false,
+    );
+    await click('[aria-label="Clear recording"]');
+    await click('[role="dialog"] .danger');
+    await waitFor(
+      `document.querySelector('[aria-label="Clear recording"]:disabled')`,
+    );
+    await features.assertSavedChain(featureApi);
+    await click('[aria-label="Select track 1"]');
+    await settle();
+    await features.assertSavedChain(featureApi);
+    await features.openSaved(featureApi, "Sound demo");
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[aria-label="Clear recording"]').disabled`,
+      ),
+      false,
     );
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(
@@ -221,6 +353,9 @@ app
           "saved session reload",
           "synthetic microphone recording",
           "pause/resume",
+          "reusable stack presets persist and restore order and bypass state",
+          "multitrack overdub monitoring, mix playback and mix versus track export",
+          "saved projects reload track state and clearing only affects the open take",
         ],
         output,
       }),

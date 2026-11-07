@@ -10,6 +10,22 @@ export interface StudioPreferences {
 
 export type PreferencePatch = Partial<Omit<StudioPreferences, "exportFolder">>;
 
+export interface StudioTrack {
+  id: string;
+  name: string;
+  audio: AudioData | null;
+  settings: StudioSettings;
+  offset: number;
+  volume: number;
+  muted: boolean;
+}
+
+export interface StackPreset {
+  id: string;
+  name: string;
+  settings: Omit<StudioSettings, "trimStart" | "trimEnd">;
+}
+
 export interface SavedRecording {
   id: string;
   name: string;
@@ -17,7 +33,13 @@ export interface SavedRecording {
   duration: number;
   audio: AudioData;
   settings: StudioSettings;
+  tracks?: StudioTrack[];
+  activeTrackId?: string;
 }
+export type RecordingSummary = Pick<
+  SavedRecording,
+  "id" | "name" | "createdAt" | "duration" | "settings"
+> & { trackCount: number };
 export interface Studio {
   name: string;
   setName: (name: string) => void;
@@ -52,6 +74,25 @@ export interface Studio {
   toggleEffect: (id: string) => void;
   moveEffect: (id: string, direction: -1 | 1) => void;
   resetSettings: () => void;
+  stackPresets: StackPreset[];
+  saveStackPreset: (name: string) => Promise<void>;
+  applyStackPreset: (id: string) => void;
+  deleteStackPreset: (id: string) => Promise<void>;
+  tracks: StudioTrack[];
+  activeTrackId: string;
+  selectTrack: (id: string) => void;
+  addTrack: () => void;
+  removeTrack: (id: string) => void;
+  updateTrack: (
+    id: string,
+    patch: Partial<Pick<StudioTrack, "name" | "offset" | "volume" | "muted">>,
+  ) => void;
+  clearRecording: () => void;
+  mixPlaying: boolean;
+  mixing: boolean;
+  playMix: () => Promise<void>;
+  monitorOtherTracks: boolean;
+  setMonitorOtherTracks: (value: boolean) => void;
   processing: boolean;
   playing: boolean;
   playhead: number;
@@ -62,12 +103,16 @@ export interface Studio {
   seek: (seconds: number) => void;
   importFile: (file: File) => Promise<void>;
   loadDemo: () => Promise<void>;
-  exportAudio: (format: "wav" | "mp3", bitrate?: number) => Promise<void>;
+  exportAudio: (
+    format: "wav" | "mp3",
+    bitrate?: number,
+    scope?: "track" | "mix",
+  ) => Promise<void>;
   fastExport: () => Promise<void>;
   exporting: boolean;
-  recordings: SavedRecording[];
+  recordings: RecordingSummary[];
   saveRecording: () => Promise<void>;
-  loadRecording: (id: string) => void;
+  loadRecording: (id: string) => Promise<boolean>;
   deleteRecording: (id: string) => Promise<void>;
   newRecording: () => void;
   error: string | null;

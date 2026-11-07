@@ -466,10 +466,153 @@ h1 {
 .fast-export-button {
   white-space: nowrap;
 }
+.clear-recording-button {
+  white-space: nowrap;
+}
 @media (max-width: 1100px) {
   .session-toolbar:has(.fast-export-button) .session-label {
     display: none;
   }
+  .clear-recording-button > span {
+    display: none;
+  }
+}
+.track-panel {
+  border: 1px solid #363138;
+  border-radius: 8px;
+  background: #1b191c;
+  padding: 16px;
+  margin: 16px 0 25px;
+}
+.track-panel-header,
+.track-panel-actions,
+.stack-preset-picker,
+.stack-preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.track-panel-header,
+.stack-preset-actions {
+  justify-content: space-between;
+}
+.track-panel-header h2 {
+  margin: 3px 0 0;
+  font-size: 17px;
+  color: #f2e5db;
+}
+.track-panel-header h2 small {
+  color: #ab9590;
+  font-size: 10px;
+  margin-left: 5px;
+}
+.track-panel-hint,
+.monitor-toggle {
+  font-size: 11px;
+  color: #b2a4ad;
+  margin: 7px 0 12px;
+}
+.monitor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.monitor-toggle input {
+  accent-color: var(--orange);
+}
+.project-tracks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.project-tracks li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #3a333a;
+  border-radius: 6px;
+  background: #211e22;
+}
+.project-tracks li.active {
+  border-color: #90593f;
+  background: #282021;
+}
+.track-select {
+  flex: 1 1 105px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: #f1dfd8;
+  padding: 4px 0;
+}
+.track-select > span:last-child {
+  min-width: 0;
+}
+.track-select strong,
+.track-select small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-select strong {
+  font-size: 12px;
+}
+.track-select small,
+.track-label {
+  font-size: 9px;
+  color: #b4a4af;
+}
+.track-number {
+  background: #3a2b2c;
+  color: #e5ad90;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 6px;
+}
+.track-label {
+  display: grid;
+  gap: 2px;
+  width: 56px;
+}
+.track-name {
+  width: clamp(56px, 8vw, 116px);
+}
+.track-label input,
+.stack-preset-picker select,
+.stack-preset-form input {
+  min-width: 0;
+  border: 1px solid #51414a;
+  border-radius: 5px;
+  padding: 5px 6px;
+  background: #19161a;
+  color: #ede0d8;
+  font-size: 11px;
+}
+.stack-preset-controls {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0;
+}
+.stack-preset-picker select {
+  flex: 1;
+}
+.stack-preset-actions .text-button {
+  text-align: left;
+}
+.stack-preset-form {
+  margin-top: 12px;
+}
+.export-scope {
+  margin: 12px 0;
 }
 .studio-preferences {
   display: grid;

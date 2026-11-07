@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowDown,
@@ -54,6 +55,7 @@ import type { EffectPreset, StudioSettings } from "./audio/types";
 import type { Studio } from "./studio-types";
 import { TrimOverlay } from "./components/TrimOverlay";
 import { waveformPeaks } from "./audio/utils";
+import { MAX_TRACK_OFFSET, MAX_TRACKS } from "./audio/mix";
 import { resizeTrim, type TrimRange } from "./trim";
 
 const formatTime = (seconds: number, decimals = false) => {
@@ -126,9 +128,9 @@ function Modal({
   close.current = onClose;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const first = panel.current?.querySelector<HTMLElement>(
-      "button, input, select",
-    );
+    const first =
+      panel.current?.querySelector<HTMLElement>("[data-initial-focus]") ??
+      panel.current?.querySelector<HTMLElement>("button, input, select");
     first?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -158,7 +160,8 @@ function Modal({
       previous?.focus();
     };
   }, []);
-  return (
+  // Render dialogs outside the scrollable inspector. https://react.dev/reference/react-dom/createPortal#rendering-a-modal-dialog-with-a-portal
+  return createPortal(
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
@@ -187,7 +190,8 @@ function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -384,7 +388,7 @@ function Recorder({
   onImport: () => void;
 }) {
   const recording = studio.recordingState !== "idle";
-  const busy = studio.processing || studio.exporting;
+  const busy = studio.processing || studio.exporting || studio.mixing;
   const sourceDuration = studio.audio
     ? studio.audio.samples.length / studio.audio.sampleRate
     : 0;
@@ -400,6 +404,9 @@ function Recorder({
   useEffect(() => {
     setTrimDraft(null);
   }, [studio.audio]);
+  useEffect(() => {
+    setTrimOpen(false);
+  }, [studio.activeTrackId]);
   return (
     <section className="recorder-panel" aria-label="Voice recorder">
       {studio.previewPresetId && (
@@ -777,7 +784,8 @@ function EffectsBrowser({
       /* Favorites remain usable for this session if storage is full. */
     }
   };
-  const disabled = studio.recordingState !== "idle" || studio.exporting;
+  const disabled =
+    studio.recordingState !== "idle" || studio.exporting || studio.mixing;
   return (
     <section
       className="effects-section"
@@ -960,6 +968,350 @@ function EffectsBrowser({
   );
 }
 
+function StackPresetControls({
+  studio,
+  disabled,
+}: {
+  studio: Studio;
+  disabled: boolean;
+}) {
+  const [selected, setSelected] = useState("");
+  const [dialog, setDialog] = useState<"save" | "delete" | null>(null);
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const preset = studio.stackPresets.find((item) => item.id === selected);
+  const open = (action: "save" | "delete") => {
+    setError("");
+    setName("");
+    setDialog(action);
+  };
+  const submit = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      if (dialog === "save") await studio.saveStackPreset(name);
+      else {
+        await studio.deleteStackPreset(selected);
+        setSelected("");
+      }
+      setDialog(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update presets.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="stack-preset-controls">
+      <div className="stack-preset-picker">
+        <select
+          aria-label="Saved stack preset"
+          disabled={disabled || !studio.stackPresets.length}
+          value={preset?.id ?? ""}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          <option value="">
+            {studio.stackPresets.length
+              ? "Choose a saved preset"
+              : "No saved presets yet"}
+          </option>
+          {studio.stackPresets.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+        <button
+          className="button subtle small"
+          disabled={disabled || !preset}
+          onClick={() => studio.applyStackPreset(selected)}
+        >
+          Apply
+        </button>
+      </div>
+      <div className="stack-preset-actions">
+        <button
+          className="text-button"
+          disabled={disabled || !studio.effectChain.length}
+          onClick={() => open("save")}
+        >
+          Save as preset
+        </button>
+        {preset && (
+          <button
+            className="text-button"
+            disabled={disabled}
+            onClick={() => open("delete")}
+          >
+            Delete preset
+          </button>
+        )}
+      </div>
+      {dialog && (
+        <Modal
+          title={
+            dialog === "save"
+              ? "Save effect stack preset"
+              : "Delete this stack preset?"
+          }
+          onClose={() => {
+            if (!saving) setDialog(null);
+          }}
+        >
+          <form
+            className="stack-preset-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            {dialog === "save" ? (
+              <label className="bitrate-field">
+                Preset name
+                <input
+                  aria-label="Preset name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  maxLength={60}
+                  required
+                  data-initial-focus
+                  disabled={saving}
+                />
+              </label>
+            ) : (
+              <p className="modal-intro">
+                “{preset?.name}” will be removed from your saved presets. Any
+                track already using it keeps its effects.
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="preferences-error">
+                {error}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button subtle"
+                disabled={saving}
+                onClick={() => setDialog(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`button ${dialog === "save" ? "primary" : "danger"}`}
+                disabled={saving || (dialog === "save" && !name.trim())}
+              >
+                {dialog === "save" ? "Save preset" : "Delete preset"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function TrackPanel({
+  studio,
+  disabled,
+}: {
+  studio: Studio;
+  disabled: boolean;
+}) {
+  const [removeId, setRemoveId] = useState<string | null>(null);
+  const target = studio.tracks.find((track) => track.id === removeId);
+  const audible = studio.tracks.some((track) => track.audio && !track.muted);
+  return (
+    <section className="track-panel" aria-label="Project tracks">
+      <div className="track-panel-header">
+        <div>
+          <div className="eyebrow">MULTITRACK</div>
+          <h2>
+            Project tracks{" "}
+            <small>
+              {studio.tracks.length}/{MAX_TRACKS}
+            </small>
+          </h2>
+        </div>
+        <div className="track-panel-actions">
+          <button
+            className="button subtle small"
+            disabled={disabled || !audible}
+            onClick={() => void studio.playMix()}
+          >
+            {studio.mixing ? (
+              <LoaderCircle size={14} className="spinning" />
+            ) : studio.mixPlaying ? (
+              <Square size={14} />
+            ) : (
+              <Play size={14} />
+            )}
+            {studio.mixing
+              ? "Preparing mix…"
+              : studio.mixPlaying
+                ? "Stop mix"
+                : "Play mix"}
+          </button>
+          <button
+            className="button soft-orange small"
+            disabled={disabled || studio.tracks.length >= MAX_TRACKS}
+            onClick={studio.addTrack}
+          >
+            <Plus size={14} /> Add track
+          </button>
+        </div>
+      </div>
+      <p className="track-panel-hint">
+        Select a track to record, import, trim or edit its effects.
+      </p>
+      {studio.tracks.some(
+        (track) =>
+          track.id !== studio.activeTrackId && track.audio && !track.muted,
+      ) && (
+        <label className="monitor-toggle">
+          <input
+            type="checkbox"
+            checked={studio.monitorOtherTracks}
+            disabled={disabled}
+            onChange={(event) =>
+              studio.setMonitorOtherTracks(event.target.checked)
+            }
+          />{" "}
+          Hear other tracks while recording{" "}
+          <Headphones size={13} aria-hidden="true" />
+        </label>
+      )}
+      <ol className="project-tracks">
+        {studio.tracks.map((track, index) => {
+          const active = track.id === studio.activeTrackId;
+          const label = `track ${index + 1}`;
+          return (
+            <li key={track.id} className={active ? "active" : ""}>
+              <button
+                className="track-select"
+                aria-label={`Select ${label}`}
+                aria-pressed={active}
+                disabled={disabled}
+                onClick={() => studio.selectTrack(track.id)}
+              >
+                <span className="track-number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span>
+                  <strong>{track.name || `Track ${index + 1}`}</strong>
+                  <small>
+                    {track.audio
+                      ? `${formatTime(track.audio.samples.length / track.audio.sampleRate, true)} source`
+                      : "Ready for audio"}
+                  </small>
+                </span>
+              </button>
+              {active && (
+                <label className="track-label track-name">
+                  Name
+                  <input
+                    aria-label="Track name"
+                    value={track.name}
+                    maxLength={60}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      studio.updateTrack(track.id, { name: event.target.value })
+                    }
+                  />
+                </label>
+              )}
+              <label className="track-label">
+                Start (s)
+                <input
+                  aria-label={`Start time for ${label}`}
+                  type="number"
+                  min={0}
+                  max={MAX_TRACK_OFFSET}
+                  step="0.01"
+                  value={track.offset}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    studio.updateTrack(track.id, {
+                      offset: Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label className="track-label">
+                Level %
+                <input
+                  aria-label={`Volume for ${label}`}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(track.volume * 100)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    studio.updateTrack(track.id, {
+                      volume: Number(event.target.value) / 100,
+                    })
+                  }
+                />
+              </label>
+              <button
+                className="button subtle small"
+                aria-label={`${track.muted ? "Unmute" : "Mute"} ${label}`}
+                aria-pressed={track.muted}
+                disabled={disabled}
+                onClick={() =>
+                  studio.updateTrack(track.id, { muted: !track.muted })
+                }
+              >
+                {track.muted ? "Muted" : "Mute"}
+              </button>
+              {studio.tracks.length > 1 && (
+                <button
+                  className="icon-button delete-button"
+                  aria-label={`Remove ${label}`}
+                  disabled={disabled}
+                  onClick={() =>
+                    track.audio
+                      ? setRemoveId(track.id)
+                      : studio.removeTrack(track.id)
+                  }
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {target && (
+        <Modal title="Remove this track?" onClose={() => setRemoveId(null)}>
+          <p className="modal-intro">
+            “{target.name || "Untitled track"}” and its take will be removed
+            from the open project.
+          </p>
+          <div className="modal-actions">
+            <button className="button subtle" onClick={() => setRemoveId(null)}>
+              Keep track
+            </button>
+            <button
+              className="button danger"
+              onClick={() => {
+                studio.removeTrack(target.id);
+                setRemoveId(null);
+              }}
+            >
+              Remove track
+            </button>
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function Inspector({
   studio,
   onExport,
@@ -972,7 +1324,8 @@ function Inspector({
   );
   const preset =
     PRESETS.find((item) => item.id === selectedEffect?.presetId) ?? PRESETS[0];
-  const disabled = studio.recordingState !== "idle" || studio.exporting;
+  const disabled =
+    studio.recordingState !== "idle" || studio.exporting || studio.mixing;
   const tune =
     PRESETS.find((item) => item.id === studio.previewPresetId)?.recipe
       .autotune !== undefined ||
@@ -1009,6 +1362,7 @@ function Inspector({
             Clear
           </button>
         </div>
+        <StackPresetControls studio={studio} disabled={disabled} />
         {!studio.effectChain.length ? (
           <div className="effect-chain-empty">
             <Plus size={14} />
@@ -1341,7 +1695,9 @@ function Library({
                     <span>·</span>
                     {formatTime(item.duration)}
                     <span>·</span>
-                    {effectSummary(item.settings)}
+                    {item.trackCount > 1
+                      ? `${item.trackCount} tracks`
+                      : effectSummary(item.settings)}
                   </p>
                 </div>
                 <button
@@ -1349,11 +1705,11 @@ function Library({
                   disabled={
                     studio.recordingState !== "idle" ||
                     studio.processing ||
-                    studio.exporting
+                    studio.exporting ||
+                    studio.mixing
                   }
-                  onClick={() => {
-                    studio.loadRecording(item.id);
-                    onBack();
+                  onClick={async () => {
+                    if (await studio.loadRecording(item.id)) onBack();
                   }}
                 >
                   Open
@@ -1520,20 +1876,34 @@ function PreferencesDialog({
 export default function App() {
   const studio = useStudio();
   const [page, setPage] = useState<"studio" | "recordings">("studio");
-  const [modal, setModal] = useState<"export" | "help" | "settings" | null>(
-    null,
-  );
+  const [modal, setModal] = useState<
+    "export" | "help" | "settings" | "clear" | null
+  >(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [format, setFormat] = useState<"wav" | "mp3">("wav");
   const [bitrate, setBitrate] = useState(192);
+  const [exportScope, setExportScope] = useState<"track" | "mix">("track");
   const fileInput = useRef<HTMLInputElement>(null);
   const effectsRef = useRef<HTMLElement>(null);
-  const busy = studio.processing || studio.exporting;
+  const busy = studio.processing || studio.exporting || studio.mixing;
   const recording = studio.recordingState !== "idle";
+  const hasAudio = studio.tracks.some((track) => track.audio);
+  const audibleTracks = studio.tracks.filter(
+    (track) => track.audio && !track.muted,
+  ).length;
+  const activeTrack = studio.tracks.find(
+    (track) => track.id === studio.activeTrackId,
+  );
+  const canExport = Boolean(studio.audio || audibleTracks);
   const openImport = () => fileInput.current?.click();
   const openExport = () => {
     setFormat(studio.preferences.exportFormat);
     setBitrate(studio.preferences.exportBitrate);
+    setExportScope(
+      (studio.tracks.length > 1 && audibleTracks > 0) || !studio.audio
+        ? "mix"
+        : "track",
+    );
     setModal("export");
   };
   const goStudio = () => setPage("studio");
@@ -1603,7 +1973,10 @@ export default function App() {
           aria-label="New recording"
           title="New recording"
           disabled={recording || busy}
-          onClick={studio.newRecording}
+          onClick={() => {
+            studio.newRecording();
+            goStudio();
+          }}
         >
           <Plus size={16} />
           <span>New recording</span>
@@ -1636,7 +2009,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.2.0"}</span>
+            <span>V{window.voiceforge?.version || "1.3.0"}</span>
           </div>
         </div>
       </aside>
@@ -1706,7 +2079,11 @@ export default function App() {
                         onChange={(event) => studio.setName(event.target.value)}
                       />
                       <span className="session-label">
-                        {studio.audio ? "AUDIO SESSION" : "NEW SESSION"}
+                        {studio.tracks.length > 1
+                          ? "MULTITRACK PROJECT"
+                          : hasAudio
+                            ? "AUDIO SESSION"
+                            : "NEW SESSION"}
                       </span>
                     </div>
                     <div className="session-actions">
@@ -1719,8 +2096,17 @@ export default function App() {
                         Import
                       </button>
                       <button
-                        className="button subtle small"
+                        className="button subtle small clear-recording-button"
+                        aria-label="Clear recording"
+                        title="Clear the selected track’s recording"
                         disabled={!studio.audio || recording || busy}
+                        onClick={() => setModal("clear")}
+                      >
+                        <Trash2 size={14} /> <span>Clear take</span>
+                      </button>
+                      <button
+                        className="button subtle small"
+                        disabled={!hasAudio || recording || busy}
                         onClick={() => {
                           void studio.saveRecording();
                         }}
@@ -1730,7 +2116,7 @@ export default function App() {
                       </button>
                       <button
                         className="button soft-orange small"
-                        disabled={!studio.audio || recording || busy}
+                        disabled={!canExport || recording || busy}
                         onClick={openExport}
                       >
                         <ArrowDownToLine size={14} />
@@ -1739,7 +2125,13 @@ export default function App() {
                       {window.voiceforge && (
                         <button
                           className="button soft-orange small fast-export-button"
-                          disabled={!studio.audio || recording || busy}
+                          disabled={
+                            (studio.tracks.length > 1
+                              ? !audibleTracks
+                              : !studio.audio) ||
+                            recording ||
+                            busy
+                          }
                           title={
                             studio.preferences.exportFolder
                               ? `Export ${studio.preferences.exportFormat.toUpperCase()} to ${studio.preferences.exportFolder}`
@@ -1765,6 +2157,7 @@ export default function App() {
                     </div>
                   )}
                 </RecorderDock>
+                <TrackPanel studio={studio} disabled={busy || recording} />
                 <EffectsBrowser studio={studio} effectsRef={effectsRef} />
               </>
             ) : (
@@ -1815,6 +2208,29 @@ export default function App() {
       {modal === "settings" && (
         <PreferencesDialog studio={studio} onClose={() => setModal(null)} />
       )}
+      {modal === "clear" && (
+        <Modal title="Clear this recording?" onClose={() => setModal(null)}>
+          <p className="modal-intro">
+            The take in “{activeTrack?.name || "Selected track"}” will be
+            removed from the open project. Its effects will be ready for the
+            next take.
+          </p>
+          <div className="modal-actions">
+            <button className="button subtle" onClick={() => setModal(null)}>
+              Keep take
+            </button>
+            <button
+              className="button danger"
+              onClick={() => {
+                studio.clearRecording();
+                setModal(null);
+              }}
+            >
+              Clear take
+            </button>
+          </div>
+        </Modal>
+      )}
       {modal === "export" && (
         <Modal
           title="Ready for the world."
@@ -1827,6 +2243,26 @@ export default function App() {
             Your applied stack and trim are included. A preview is never saved
             or exported unless you add it to the stack.
           </p>
+          {studio.tracks.length > 1 && (
+            <label className="bitrate-field export-scope">
+              Export audio from
+              <select
+                aria-label="Export audio from"
+                value={exportScope}
+                disabled={studio.exporting}
+                onChange={(event) =>
+                  setExportScope(event.target.value === "mix" ? "mix" : "track")
+                }
+              >
+                <option value="mix" disabled={!audibleTracks}>
+                  Project mix
+                </option>
+                <option value="track" disabled={!studio.audio}>
+                  Selected track · {activeTrack?.name || "Untitled track"}
+                </option>
+              </select>
+            </label>
+          )}
           <div className="export-format-options">
             <button
               className={format === "wav" ? "selected" : ""}
@@ -1874,17 +2310,27 @@ export default function App() {
             <AudioLines size={18} />
             <div>
               <strong>
-                {studio.name || "Untitled recording"}.{format}
+                {studio.name || "Untitled recording"}
+                {exportScope === "track" && studio.tracks.length > 1
+                  ? ` - ${activeTrack?.name || "Track"}`
+                  : ""}
+                .{format}
               </strong>
               <span>
-                {formatTime(
-                  Math.max(
-                    0,
-                    (studio.settings.trimEnd || sourceDuration) -
-                      studio.settings.trimStart,
-                  ),
-                )}{" "}
-                source · {effectSummary(studio.settings)}
+                {exportScope === "mix" ? (
+                  `${audibleTracks} ${audibleTracks === 1 ? "track" : "tracks"} in the mix`
+                ) : (
+                  <>
+                    {formatTime(
+                      Math.max(
+                        0,
+                        (studio.settings.trimEnd || sourceDuration) -
+                          studio.settings.trimStart,
+                      ),
+                    )}{" "}
+                    source · {effectSummary(studio.settings)}
+                  </>
+                )}
               </span>
             </div>
           </div>
@@ -1898,9 +2344,13 @@ export default function App() {
             </button>
             <button
               className="button primary"
-              disabled={studio.exporting || !studio.audio || studio.processing}
+              disabled={
+                studio.exporting ||
+                studio.processing ||
+                (exportScope === "mix" ? !audibleTracks : !studio.audio)
+              }
               onClick={async () => {
-                await studio.exportAudio(format, bitrate);
+                await studio.exportAudio(format, bitrate, exportScope);
                 setModal(null);
               }}
             >

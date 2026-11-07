@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBObjectStore as FakeObjectStore } from "fake-indexeddb";
 import { DEFAULT_SETTINGS } from "./audio/types";
-import { listRecordings, putRecording, removeRecording } from "./storage";
+import {
+  getRecording,
+  listRecordingSummaries,
+  putRecording,
+  removeRecording,
+  listStackPresets,
+  putStackPreset,
+} from "./storage";
+import { makeStackPreset, applyStackPreset } from "./effect-settings";
 import type { SavedRecording } from "./studio-types";
 
 function take(id = "take-1", createdAt = 1000): SavedRecording {
@@ -29,14 +37,55 @@ afterEach(() => {
 });
 
 describe("local recording library", () => {
+  it("adds reusable stacks without losing a recording from the original library", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("voiceforge-studio", 1);
+      request.onupgradeneeded = () =>
+        request.result
+          .createObjectStore("recordings", { keyPath: "id" })
+          .put(take());
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      trimStart: 2,
+      tuningKey: 3,
+      effectChain: [
+        { id: "1", presetId: "demon", enabled: false, intensity: 0.4 },
+        { id: "2", presetId: "cathedral", enabled: true, intensity: 0.7 },
+      ],
+    };
+    await putStackPreset(makeStackPreset("Dark hook", settings, "preset-1"));
+    expect(await getRecording("take-1")).toEqual(take());
+    const [preset] = await listStackPresets();
+    let nextId = 0;
+    const applied = applyStackPreset(
+      { ...DEFAULT_SETTINGS, trimStart: 5, trimEnd: 7 },
+      preset,
+      () => `new-${++nextId}`,
+    );
+    expect(applied).toMatchObject({
+      trimStart: 5,
+      trimEnd: 7,
+      tuningKey: 3,
+      effectChain: [
+        { id: "new-1", presetId: "demon", enabled: false, intensity: 0.4 },
+        { id: "new-2", presetId: "cathedral", enabled: true, intensity: 0.7 },
+      ],
+    });
+  });
   it("opens a fresh library without requiring an existing database", async () => {
-    expect(await listRecordings()).toEqual([]);
+    expect(await listRecordingSummaries()).toEqual([]);
   });
 
   it("persists original PCM samples and effect settings across separate database connections", async () => {
     const recording = take();
     await putRecording(recording);
-    const [saved] = await listRecordings();
+    const saved = (await getRecording(recording.id))!;
     expect(saved).toEqual(recording);
     expect(saved.audio.samples).toBeInstanceOf(Float32Array);
     expect(saved.audio.samples).not.toBe(recording.audio.samples);
@@ -48,7 +97,7 @@ describe("local recording library", () => {
     recording.audio.samples[0] = -1;
     recording.settings.presetId = "original";
     recording.name = "Changed in editor";
-    const [saved] = await listRecordings();
+    const saved = (await getRecording(recording.id))!;
     expect(saved.name).toBe("Demon take");
     expect(saved.audio.samples[0]).toBe(0.25);
     expect(saved.settings.presetId).toBe("demon");
@@ -62,10 +111,12 @@ describe("local recording library", () => {
       name: "Renamed original",
       settings: { ...DEFAULT_SETTINGS },
     });
-    const rows = await listRecordings();
+    const rows = await listRecordingSummaries();
     expect(rows.map((row) => row.id)).toEqual(["new", "old"]);
     expect(rows[1].name).toBe("Renamed original");
     expect(rows[1].settings.presetId).toBe("original");
+    expect(rows[1]).toMatchObject({ trackCount: 1 });
+    expect(rows[1]).not.toHaveProperty("audio");
   });
 
   it("removes only the chosen take and permits removing an already missing take", async () => {
@@ -73,14 +124,16 @@ describe("local recording library", () => {
     await putRecording(take("second"));
     await removeRecording("first");
     await removeRecording("first");
-    expect((await listRecordings()).map((row) => row.id)).toEqual(["second"]);
+    expect((await listRecordingSummaries()).map((row) => row.id)).toEqual([
+      "second",
+    ]);
   });
 
   it("does not lose independent takes saved concurrently", async () => {
     await Promise.all(
       Array.from({ length: 8 }, (_, i) => putRecording(take(`take-${i}`, i))),
     );
-    expect((await listRecordings()).map((row) => row.id)).toEqual(
+    expect((await listRecordingSummaries()).map((row) => row.id)).toEqual(
       Array.from({ length: 8 }, (_, i) => `take-${7 - i}`),
     );
   });
@@ -97,7 +150,7 @@ describe("local recording library", () => {
       return request;
     });
     await expect(putRecording(take())).rejects.toThrow(/could not be saved/i);
-    expect(await listRecordings()).toEqual([]);
+    expect(await listRecordingSummaries()).toEqual([]);
   });
 
   it("closes the database when an invalid value cannot be cloned", async () => {
