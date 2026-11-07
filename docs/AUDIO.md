@@ -2,7 +2,7 @@
 
 VoiceForge processes mono floating-point PCM locally in a background worker. The source recording remains unchanged. Editing an effect chain re-renders from the source, so effects remain reversible.
 
-The library contains 90 presets across Essentials, Characters, Spaces, Musical, Creative and Rap. The Rap category contains 30 recipes for drill, trap, pop rap, boom bap, West Coast, grime, phonk, cloud rap and other delivery styles. These are vocal processing choices rather than beat generators or imitations of named performers. Presets combine pitch transposition, filters, a soft saturator, a compressor, a noise gate, ring modulation, amplitude modulation, chorus, vibrato, bit crushing, delay and a damped Schroeder reverb. Reverse and playback-speed effects are also available. Echo and reverb tails are included in playback and export.
+The library contains 100 presets across Essentials, Characters, Spaces, Musical, Creative, Rap and Auto-Tune. Rap contains 30 recipes for drill, trap, pop rap, boom bap, West Coast, grime, phonk, cloud rap and other delivery styles. Auto-Tune adds 10 pitch-correction recipes with different retune speeds and vocal processing. Presets combine pitch transposition, filters, a soft saturator, a compressor, a noise gate, ring modulation, amplitude modulation, chorus, vibrato, bit crushing, delay and a damped Schroeder reverb. Reverse and playback-speed effects are also available. Echo and reverb tails are included in playback and export.
 
 Each chain can contain up to eight effect slots, including repeated presets. Enabled effects run in their displayed order. For example, distortion before a telephone filter produces a different result from distortion after the filter. Each slot has its own intensity and bypass control. At zero intensity that slot is bypassed. Disabling or removing one effect preserves the rest of the chain.
 
@@ -14,9 +14,9 @@ Saved version 1.0 sessions without a chain are read as one enabled slot containi
 
 Pitch changes use a phase vocoder: a radix-2 FFT, Hann windows, four overlapping analysis frames, instantaneous-frequency estimation and spectral remapping. Transposition preserves the source duration. It also shifts the vocal formants, making it useful for character voices. The Slow motion and Fast forward presets deliberately change both duration and pitch.
 
-Auto tune estimates the fundamental with YIN's cumulative mean normalized difference, then maps the detected pitch to the nearest note in the selected chromatic, major or natural-minor scale. It runs entirely on the device and requires no downloaded model. Gentle tune applies half of the correction; hard correction locks the detected sustained note to the target. The key selector is C=0 through B=11.
+Pitch correction estimates the fundamental with YIN's cumulative mean normalized difference, then maps the detected pitch to the nearest note in the selected chromatic, major, natural minor, harmonic minor or minor pentatonic scale. It runs entirely on the device. Retune speed controls how quickly the pitch ratio approaches its target. A short time gives an abrupt snap, while a longer time preserves more of the transition. Intensity controls the amount of correction.
 
-The correction is designed for one clear, monophonic singing voice. Speech, breaths, noisy input, chords and several simultaneous voices cannot be reliably assigned one musical note. Unvoiced frames retain their original pitch. This implementation does not preserve formants or offer the transient control and smoothing of a professional vocal tuning plugin; strong correction can sound synthetic. Intensity and Gentle tune provide lighter alternatives.
+The correction is designed for one clear, monophonic singing voice. Speech, breaths, noisy input, chords and several simultaneous voices cannot be reliably assigned one musical note. Unvoiced frames retain their original pitch. Strong correction can sound synthetic, and the spectral shift moves vocal formants along with the pitch. Lower intensity and the gentler presets provide lighter correction.
 
 ## Limits and verification
 

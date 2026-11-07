@@ -7,17 +7,19 @@ A Windows voice recording studio. Record a take, choose a voice effect, adjust i
 Open the `VoiceForge-<version>-Windows.exe` executable from the `release` folder. The portable app needs no installer. The executable is unsigned, so Windows may show its standard unknown-publisher prompt.
 
 1. Choose your microphone, then press **Record**. Pause and resume within the same take, or stop when finished.
-2. Click an effect card to audition it. Search or filter the 90 presets, including 30 in the Rap category. Previewing keeps your current stack unchanged.
+2. Click an effect card to audition it. Search or filter the 100 presets, including 30 in Rap and 10 in Auto-Tune. Previewing keeps your current stack unchanged.
 3. Use an effect's separate **Add** button to put it in the stack. Combine up to eight effects, adjust a selected slot's strength, and compare the result with the original. Drag the waveform's trim handles or type exact start and end times.
-4. Save the take to your local recording library, or export a WAV or MP3 to a folder you choose.
+4. Save the take to your local recording library. Use **Export** to choose a filename and location, or **Fast export** to save immediately with your export defaults.
 
 You can also import an existing audio file or try the synthetic sound demo before recording.
 
 Takes can be up to 10 minutes. Imported files must be under 100 MB. VoiceForge mixes audio to mono at 48 kHz, suited to a single voice. MP3 export offers 128, 192, or 320 kbps.
 
+In **Settings**, select a default microphone, choose a default export folder, and set the Fast export format. Use **Detect microphones** to load input names. If the saved microphone is unavailable, recording uses the system default. Fast export uses the take's name and adds a numeric suffix if the file already exists.
+
 ## Effects
 
-The 90-preset library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. Its Rap category contains 30 vocal treatments. Presets combine actual audio processing; they are not cloud voice models.
+The library includes demon and monster voices, robot and radio treatments, chipmunk-style pitch, reverb spaces, echo, chorus, distortion, tremolo, bit crushing, and scale-based pitch correction. All presets process audio locally.
 
 The effect rack holds up to eight slots in the order they process your voice. For example, use **Add** on **Demon**, then **Cathedral** to place the character voice in a large reverberant space. Select a rack slot to adjust its intensity, use its bypass button to compare without deleting it, or move it up or down to change the processing order. Removing a slot leaves the others in place. The Add button cannot duplicate an effect already in your stack.
 
@@ -27,15 +29,15 @@ Clicking quickly through choices cancels older previews; only the latest finishe
 
 Trimming uses the original recording's timeline. Drag either edge to shorten the kept section, drag the selection to move it, or enter exact seconds. Reverb and echo can add a tail after that section, but do not move the source trim handles. Saved takes retain the full original audio, trim, ordered effect slots, intensities, and bypass states. Sessions saved before effect chains were introduced reopen with their previous preset in one slot.
 
-The pitch correction effect is a lightweight creative auto-tune effect for a single voice. Choose a key and scale for musical material. Noisy recordings, breathy speech, chords, and multiple speakers can cause pitch-detection artifacts. It is not the Antares Auto-Tune product. Extreme pitch and distortion settings are intentionally stylized.
+The **Auto-Tune** section ranges from subtle verse correction to hard snap, melodic trap, tight drill, and 808 ballad vocals. Match the key and scale to your beat, and adjust **Retune timing** to control how quickly the voice moves to the target note. VoiceForge's built-in pitch correction approximates these styles for a single voice. The hard-snap preset draws on the technique described in the [Antares tuning guide](https://www.antarestech.com/blog/tutorial-getting-started-with-autotune-2026).
 
 Effects are applied after recording. The original take remains available for comparison and further changes. The app does not install a virtual microphone or change your voice in other applications.
 
 ## Local storage and privacy
 
-- Microphone access starts only when recording begins. Windows microphone permission must be enabled for desktop apps.
+- Microphone access starts when you record or briefly when you choose **Detect microphones**. Windows microphone permission must be enabled for desktop apps.
 - Saved takes and their effect settings live in this application's local Chromium storage. Use the recording library's delete action to remove a saved take.
-- Exports are ordinary audio files stored only where you choose in the Windows save dialog.
+- Exports are ordinary audio files. Fast export uses the folder you select in **Settings**.
 - Saving a take to the library and exporting a file are separate actions. Keep exported copies of important recordings before clearing app data or moving to another computer.
 - Local recordings are not encrypted by the app. Protect your Windows account and disk if the recordings are sensitive.
 
@@ -79,6 +81,6 @@ Only the fixed local development address `http://127.0.0.1:5173/` is accepted. A
 
 ## Technical notes
 
-The interface uses React and TypeScript, bundled by Vite. A sandboxed Electron renderer captures microphone audio. A worker applies local digital signal processing and encodes exports; MP3 encoding uses LAME through `@breezystack/lamejs`. The native bridge exposes only an audio save dialog and validates its sender and payload.
+The interface uses React and TypeScript, bundled by Vite. A sandboxed Electron renderer captures microphone audio. A worker applies local digital signal processing and encodes exports. MP3 encoding uses LAME through `@breezystack/lamejs`. The native bridge handles preferences, folder selection, and export, with sender and payload validation.
 
 See [audio processing details](docs/AUDIO.md), [development notes](docs/DEVELOPMENT.md), and [third-party notices](THIRD_PARTY_NOTICES.md).

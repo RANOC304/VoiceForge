@@ -76,16 +76,27 @@ function applyRecipe(
   const tuning = clamp((recipe.autotune ?? 0) * intensity, 0, 1);
   if (pitch || tuning) {
     const baseRatio = 2 ** (pitch / 12);
+    const retuneMs = settings.tuningRetuneMs ?? recipe.retuneMs ?? 0;
+    let correction = 0;
     samples = pitchShift(samples, sampleRate, (frame) => {
       if (!tuning) return baseRatio;
       const frequency = detectPitch(frame, sampleRate);
-      if (!frequency) return baseRatio;
+      if (!frequency) {
+        correction = 0;
+        return baseRatio;
+      }
       const target = nearestScaleFrequency(
         frequency,
         Math.round(settings.tuningKey),
         settings.tuningScale,
       );
-      return baseRatio * (target / frequency) ** tuning;
+      if (retuneMs === 0) return baseRatio * (target / frequency) ** tuning;
+      // Smooth in log pitch across the phase vocoder's quarter-window hop.
+      const hopMs = (1000 * frame.length) / (4 * sampleRate);
+      const targetCorrection = Math.log2(target / frequency) * tuning;
+      correction +=
+        (targetCorrection - correction) * -Math.expm1(-hopMs / retuneMs);
+      return baseRatio * 2 ** correction;
     });
   }
   if (recipe.reverse && intensity >= 0.5) samples.reverse();
@@ -187,7 +198,22 @@ export function renderAudio(
   const tuningKey = Math.round(
     bounded(settings.tuningKey, 0, 11, "Tuning key"),
   );
-  if (!["chromatic", "major", "minor"].includes(settings.tuningScale))
+  if (
+    settings.tuningRetuneMs !== undefined &&
+    (!Number.isFinite(settings.tuningRetuneMs) ||
+      settings.tuningRetuneMs < 0 ||
+      settings.tuningRetuneMs > 200)
+  )
+    throw new Error("Choose a retune time between 0 and 200 ms.");
+  if (
+    ![
+      "chromatic",
+      "major",
+      "minor",
+      "harmonicMinor",
+      "minorPentatonic",
+    ].includes(settings.tuningScale)
+  )
     throw new Error("Choose a valid tuning scale.");
 
   let length = lastSample - firstSample;

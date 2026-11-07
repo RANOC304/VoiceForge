@@ -36,6 +36,7 @@ import {
   Save,
   Scissors,
   Search,
+  Settings,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -45,6 +46,7 @@ import {
   WandSparkles,
   Waves,
   X,
+  Zap,
 } from "lucide-react";
 import { useStudio } from "./useStudio";
 import { PRESETS, CATEGORIES } from "./audio/presets";
@@ -344,6 +346,36 @@ function Waveform({
   );
 }
 
+function MicrophoneOptions({
+  studio,
+  selected,
+}: {
+  studio: Studio;
+  selected: string;
+}) {
+  const inputs = studio.devices.filter(
+    (device) =>
+      device.deviceId &&
+      device.deviceId !== "default" &&
+      device.deviceId !== "communications",
+  );
+  return (
+    <>
+      <option value="">System default microphone</option>
+      {selected && !inputs.some((device) => device.deviceId === selected) && (
+        <option value={selected}>
+          {studio.preferences.microphoneLabel || "Saved microphone"} (saved)
+        </option>
+      )}
+      {inputs.map((device, index) => (
+        <option key={device.deviceId} value={device.deviceId}>
+          {device.label || `Microphone ${index + 1}`}
+        </option>
+      ))}
+    </>
+  );
+}
+
 function Recorder({
   studio,
   onImport,
@@ -619,16 +651,7 @@ function Recorder({
             value={studio.deviceId}
             onChange={(event) => studio.setDeviceId(event.target.value)}
           >
-            <option value="">Default microphone</option>
-            {studio.devices
-              .filter(
-                (device) => device.deviceId && device.deviceId !== "default",
-              )
-              .map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Microphone ${index + 1}`}
-                </option>
-              ))}
+            <MicrophoneOptions studio={studio} selected={studio.deviceId} />
           </select>
           <button
             className="icon-button tiny"
@@ -808,6 +831,13 @@ function EffectsBrowser({
           />
         </label>
       </div>
+      {category === "Auto-Tune" && (
+        <p className="tuning-library-hint">
+          Start with Classic hard snap for sharply tuned rap vocals. Choose your
+          beat’s key and scale in Sound controls to hear the correction in
+          context.
+        </p>
+      )}
       <div className="effects-grid">
         {visible.map((preset) => {
           const instance = studio.effectChain.find(
@@ -943,11 +973,14 @@ function Inspector({
   const preset =
     PRESETS.find((item) => item.id === selectedEffect?.presetId) ?? PRESETS[0];
   const disabled = studio.recordingState !== "idle" || studio.exporting;
-  const tune = studio.effectChain.some(
-    (effect) =>
-      PRESETS.find((item) => item.id === effect.presetId)?.recipe.autotune !==
-      undefined,
-  );
+  const tune =
+    PRESETS.find((item) => item.id === studio.previewPresetId)?.recipe
+      .autotune !== undefined ||
+    studio.effectChain.some(
+      (effect) =>
+        PRESETS.find((item) => item.id === effect.presetId)?.recipe.autotune !==
+        undefined,
+    );
   return (
     <aside className="inspector" aria-label="Effect settings">
       <div className="inspector-heading">
@@ -1170,17 +1203,43 @@ function Inspector({
                 disabled={disabled}
                 onChange={(event) =>
                   studio.updateSettings({
-                    tuningScale: event.target.value as
-                      "chromatic" | "major" | "minor",
+                    tuningScale: event.target
+                      .value as StudioSettings["tuningScale"],
                   })
                 }
               >
                 <option value="chromatic">Chromatic</option>
                 <option value="major">Major</option>
                 <option value="minor">Minor</option>
+                <option value="harmonicMinor">Harmonic minor</option>
+                <option value="minorPentatonic">Minor pentatonic</option>
               </select>
             </label>
-            <p>Best with a clear, single singing voice.</p>
+            <label>
+              Retune timing
+              <select
+                value={studio.settings.tuningRetuneMs ?? "preset"}
+                disabled={disabled}
+                onChange={(event) =>
+                  studio.updateSettings({
+                    tuningRetuneMs:
+                      event.target.value === "preset"
+                        ? undefined
+                        : Number(event.target.value),
+                  })
+                }
+              >
+                <option value="preset">Use preset</option>
+                <option value="0">Snap · 0 ms</option>
+                <option value="25">Fast · 25 ms</option>
+                <option value="65">Smooth · 65 ms</option>
+                <option value="150">Natural · 150 ms</option>
+              </select>
+            </label>
+            <p>
+              Match the key and scale to your beat. Retune timing controls how
+              quickly the pitch settles.
+            </p>
           </div>
         )}
         <div className="control-divider" />
@@ -1323,10 +1382,147 @@ function Library({
   );
 }
 
+function PreferencesDialog({
+  studio,
+  onClose,
+}: {
+  studio: Studio;
+  onClose: () => void;
+}) {
+  const [mic, setMic] = useState(studio.preferences.microphoneId);
+  const [format, setFormat] = useState(studio.preferences.exportFormat);
+  const [bitrate, setBitrate] = useState(studio.preferences.exportBitrate);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Unable to update settings.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="Studio settings"
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <form
+        className="studio-preferences"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(async () => {
+            const device = studio.devices.find(
+              (input) => input.deviceId === mic,
+            );
+            await studio.savePreferences({
+              microphoneId: mic,
+              microphoneLabel: mic
+                ? device?.label ||
+                  (mic === studio.preferences.microphoneId
+                    ? studio.preferences.microphoneLabel
+                    : "")
+                : "",
+              exportFormat: format,
+              exportBitrate: bitrate,
+            });
+            onClose();
+          });
+        }}
+      >
+        <label>
+          Default microphone
+          <select
+            aria-label="Default microphone"
+            value={mic}
+            disabled={busy || studio.recordingState !== "idle"}
+            onChange={(event) => setMic(event.target.value)}
+          >
+            <MicrophoneOptions studio={studio} selected={mic} />
+          </select>
+        </label>
+        <button
+          type="button"
+          className="button subtle small"
+          disabled={busy || studio.recordingState !== "idle"}
+          onClick={() => void run(studio.detectMicrophones)}
+        >
+          <RefreshCcw size={13} />
+          Detect microphones
+        </button>
+        <label>
+          Default export folder
+          <span
+            className="preferences-folder"
+            title={studio.preferences.exportFolder ?? undefined}
+          >
+            {studio.preferences.exportFolder ?? "No folder selected"}
+          </span>
+        </label>
+        <button
+          type="button"
+          className="button subtle small"
+          disabled={busy}
+          onClick={() => void run(studio.chooseExportFolder)}
+        >
+          <FolderOpen size={14} />
+          Choose folder
+        </button>
+        <label>
+          Fast export format
+          <select
+            aria-label="Fast export format"
+            value={format}
+            disabled={busy}
+            onChange={(event) =>
+              setFormat(event.target.value === "mp3" ? "mp3" : "wav")
+            }
+          >
+            <option value="wav">WAV · 16-bit PCM</option>
+            <option value="mp3">MP3</option>
+          </select>
+        </label>
+        {format === "mp3" && (
+          <label>
+            MP3 bitrate
+            <select
+              aria-label="Fast export bitrate"
+              value={bitrate}
+              disabled={busy}
+              onChange={(event) => setBitrate(Number(event.target.value))}
+            >
+              <option value={128}>128 kbps</option>
+              <option value={192}>192 kbps</option>
+              <option value={320}>320 kbps</option>
+            </select>
+          </label>
+        )}
+        {error && (
+          <p role="alert" className="preferences-error">
+            {error}
+          </p>
+        )}
+        <button className="button primary" disabled={busy} type="submit">
+          Save preferences
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
 export default function App() {
   const studio = useStudio();
   const [page, setPage] = useState<"studio" | "recordings">("studio");
-  const [modal, setModal] = useState<"export" | "help" | null>(null);
+  const [modal, setModal] = useState<"export" | "help" | "settings" | null>(
+    null,
+  );
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [format, setFormat] = useState<"wav" | "mp3">("wav");
   const [bitrate, setBitrate] = useState(192);
@@ -1335,6 +1531,11 @@ export default function App() {
   const busy = studio.processing || studio.exporting;
   const recording = studio.recordingState !== "idle";
   const openImport = () => fileInput.current?.click();
+  const openExport = () => {
+    setFormat(studio.preferences.exportFormat);
+    setBitrate(studio.preferences.exportBitrate);
+    setModal("export");
+  };
   const goStudio = () => setPage("studio");
   const sourceDuration = studio.audio
     ? studio.audio.samples.length / studio.audio.sampleRate
@@ -1435,7 +1636,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.1.2"}</span>
+            <span>V{window.voiceforge?.version || "1.2.0"}</span>
           </div>
         </div>
       </aside>
@@ -1460,6 +1661,17 @@ export default function App() {
             >
               <Info size={17} />
             </button>
+            {window.voiceforge && (
+              <button
+                className="icon-button"
+                aria-label="Studio settings"
+                title="Studio settings"
+                disabled={recording || studio.exporting}
+                onClick={() => setModal("settings")}
+              >
+                <Settings size={17} />
+              </button>
+            )}
           </div>
         </header>
         <div
@@ -1519,11 +1731,30 @@ export default function App() {
                       <button
                         className="button soft-orange small"
                         disabled={!studio.audio || recording || busy}
-                        onClick={() => setModal("export")}
+                        onClick={openExport}
                       >
                         <ArrowDownToLine size={14} />
                         Export
                       </button>
+                      {window.voiceforge && (
+                        <button
+                          className="button soft-orange small fast-export-button"
+                          disabled={!studio.audio || recording || busy}
+                          title={
+                            studio.preferences.exportFolder
+                              ? `Export ${studio.preferences.exportFormat.toUpperCase()} to ${studio.preferences.exportFolder}`
+                              : "Choose a default export folder"
+                          }
+                          onClick={() =>
+                            studio.preferences.exportFolder
+                              ? void studio.fastExport()
+                              : setModal("settings")
+                          }
+                        >
+                          <Zap size={14} />
+                          Fast export
+                        </button>
+                      )}
                     </div>
                   </div>
                   <Recorder studio={studio} onImport={openImport} />
@@ -1545,7 +1776,7 @@ export default function App() {
             )}
           </main>
           {page === "studio" && (
-            <Inspector studio={studio} onExport={() => setModal("export")} />
+            <Inspector studio={studio} onExport={openExport} />
           )}
         </div>
       </div>
@@ -1580,6 +1811,9 @@ export default function App() {
             <X size={16} />
           </button>
         </div>
+      )}
+      {modal === "settings" && (
+        <PreferencesDialog studio={studio} onClose={() => setModal(null)} />
       )}
       {modal === "export" && (
         <Modal

@@ -1,5 +1,15 @@
 import type { AudioData, EffectInstance, StudioSettings } from "./audio/types";
 
+export interface StudioPreferences {
+  microphoneId: string;
+  microphoneLabel: string;
+  exportFolder: string | null;
+  exportFormat: "wav" | "mp3";
+  exportBitrate: number;
+}
+
+export type PreferencePatch = Partial<Omit<StudioPreferences, "exportFolder">>;
+
 export interface SavedRecording {
   id: string;
   name: string;
@@ -22,6 +32,10 @@ export interface Studio {
   deviceId: string;
   setDeviceId: (id: string) => void;
   refreshDevices: () => Promise<void>;
+  detectMicrophones: () => Promise<void>;
+  preferences: StudioPreferences;
+  savePreferences: (patch: PreferencePatch) => Promise<void>;
+  chooseExportFolder: () => Promise<void>;
   audio: AudioData | null;
   waveform: number[];
   duration: number;
@@ -49,6 +63,7 @@ export interface Studio {
   importFile: (file: File) => Promise<void>;
   loadDemo: () => Promise<void>;
   exportAudio: (format: "wav" | "mp3", bitrate?: number) => Promise<void>;
+  fastExport: () => Promise<void>;
   exporting: boolean;
   recordings: SavedRecording[];
   saveRecording: () => Promise<void>;

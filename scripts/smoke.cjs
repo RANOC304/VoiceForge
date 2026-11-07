@@ -9,15 +9,24 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const features = require("./feature-checks.cjs");
 const output = path.join(os.tmpdir(), "voiceforge-desktop-smoke-" + Date.now());
+const fastFolder = path.join(output, "fast exports");
 app.setPath("userData", path.join(output, "profile"));
 app.commandLine.appendSwitch("use-fake-device-for-media-stream");
 const errors = [];
 let window;
 let exportFormat = "wav";
-dialog.showSaveDialog = async () => ({
-  canceled: false,
-  filePath: path.join(output, "voiceforge-test." + exportFormat),
-});
+let saveDialogs = 0;
+dialog.showOpenDialog = async (_window, options) => {
+  assert.ok(options.properties.includes("openDirectory"));
+  return { canceled: false, filePaths: [fastFolder] };
+};
+dialog.showSaveDialog = async () => {
+  saveDialogs++;
+  return {
+    canceled: false,
+    filePath: path.join(output, "voiceforge-test." + exportFormat),
+  };
+};
 app.on("web-contents-created", (_event, contents) => {
   contents.on("console-message", (event) => {
     if (event.level === "error") errors.push(event.message);
@@ -51,7 +60,7 @@ const settle = () =>
 app
   .whenReady()
   .then(async () => {
-    await fs.mkdir(output, { recursive: true });
+    await fs.mkdir(fastFolder, { recursive: true });
     window = BrowserWindow.getAllWindows()[0];
     await new Promise((resolve) => {
       if (!window.webContents.isLoading()) resolve();
@@ -61,6 +70,11 @@ app
     assert.equal(
       await evaluate(`window.voiceforge.version`),
       require("../package.json").version,
+    );
+    assert.equal(
+      await evaluate(`typeof window.voiceforge.chooseExportFolder`),
+      "function",
+      "The desktop app can remember a user-chosen export folder",
     );
     await features.installAudioProbe(evaluate);
     const featureApi = { evaluate, waitFor, click, button, window, settle };
@@ -105,12 +119,66 @@ app
         "Export uses the actual effect stack with its tail, while the Original audition is only six seconds",
       );
     }
+    assert.equal(
+      await evaluate(
+        `window.voiceforge.savePreferences({exportFolder:'C:/elsewhere'}).then(()=>false,()=>true)`,
+      ),
+      true,
+    );
+    await click('[aria-label="Studio settings"]');
+    await button("Detect microphones");
+    await waitFor(
+      `document.querySelector('[aria-label="Default microphone"]:not(:disabled) option:nth-child(2)')`,
+    );
+    const microphoneId = await evaluate(`(() => {
+      const microphone = document.querySelector('[aria-label="Default microphone"]');
+      microphone.value = microphone.options[1].value;
+      microphone.dispatchEvent(new Event('change', { bubbles: true }));
+      return microphone.value;
+    })()`);
+    await button("Choose folder");
+    await waitFor(
+      `document.querySelector('.preferences-folder')?.textContent.includes('fast exports') && document.querySelector('[aria-label="Fast export format"]:not(:disabled)')`,
+    );
+    await evaluate(`(() => {
+      const format = document.querySelector('[aria-label="Fast export format"]');
+      format.value = 'mp3';
+      format.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await button("Save preferences");
+    await waitFor(`!document.querySelector('[role="dialog"]')`);
+    await fs.writeFile(
+      path.join(fastFolder, "Sound demo.mp3"),
+      "existing export",
+    );
+    const dialogsBeforeFastExport = saveDialogs;
+    await button("Fast export");
+    await waitFor(
+      `document.querySelector('.toast')?.textContent.includes('Sound demo (2).mp3')`,
+    );
+    assert.equal(saveDialogs, dialogsBeforeFastExport);
+    assert.equal(
+      await fs.readFile(path.join(fastFolder, "Sound demo.mp3"), "utf8"),
+      "existing export",
+    );
+    assert.deepEqual(
+      await fs.readFile(path.join(fastFolder, "Sound demo (2).mp3")),
+      mp3,
+    );
     await features.seedLegacy(evaluate);
     window.webContents.reload();
     await waitFor(
       `document.querySelector('[aria-label="My recordings"] .nav-count')?.textContent==='2'`,
     );
     await features.installAudioProbe(evaluate);
+    await waitFor(
+      `document.querySelector('[aria-label="Microphone"]')?.value === ${JSON.stringify(microphoneId)}`,
+    );
+    const prefs = await evaluate("window.voiceforge.getPreferences()");
+    assert.ok(microphoneId);
+    assert.equal(prefs.microphoneId, microphoneId);
+    assert.equal(prefs.exportFolder, await fs.realpath(fastFolder));
+    assert.equal(prefs.exportFormat, "mp3");
     await features.openSaved(featureApi, "Sound demo");
     await features.assertSavedChain(featureApi);
     await features.assertLegacy(featureApi);
@@ -136,7 +204,9 @@ app
         checks: [
           "native preload",
           "demo",
-          "90 presets and exactly 30 Rap presets",
+          "100 presets including 10 Auto-Tune and 30 Rap presets",
+          "saved microphone and export preferences",
+          "dialog-free export to the saved folder with collision protection",
           "card border and description audition without stack changes",
           "separate Add action builds the stack and previews it",
           "rapid temporary auditions without overlapping players",

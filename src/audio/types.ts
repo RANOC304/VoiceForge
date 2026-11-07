@@ -3,7 +3,13 @@ export interface AudioData {
   sampleRate: number;
 }
 export type EffectCategory =
-  "Essentials" | "Characters" | "Spaces" | "Musical" | "Creative" | "Rap";
+  | "Essentials"
+  | "Characters"
+  | "Spaces"
+  | "Musical"
+  | "Creative"
+  | "Rap"
+  | "Auto-Tune";
 export interface EffectRecipe {
   pitch?: number;
   reverb?: number;
@@ -20,6 +26,7 @@ export interface EffectRecipe {
   reverse?: boolean;
   speed?: number;
   autotune?: number;
+  retuneMs?: number;
   telephone?: boolean;
   robot?: boolean;
   compressor?: boolean;
@@ -49,7 +56,9 @@ export interface StudioSettings {
   trimStart: number;
   trimEnd: number;
   tuningKey: number;
-  tuningScale: "chromatic" | "major" | "minor";
+  tuningScale:
+    "chromatic" | "major" | "minor" | "harmonicMinor" | "minorPentatonic";
+  tuningRetuneMs?: number;
 }
 export interface EffectInstance {
   id: string;

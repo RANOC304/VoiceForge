@@ -199,9 +199,24 @@ async function testEffects(api) {
   const { evaluate, waitFor, click } = api;
   assert.equal(
     await evaluate("document.querySelectorAll('.effect-card').length"),
-    90,
-    "The full browser contains 90 presets",
+    100,
+    "The full browser contains 100 presets",
   );
+  await click('[aria-label="Auto-Tune"]');
+  assert.equal(
+    await evaluate("document.querySelectorAll('.effect-card').length"),
+    10,
+  );
+  let starts = await evaluate("window.__voiceforgeAudioProbe.starts");
+  await click('[aria-label="Preview Classic hard snap"]');
+  await waitForPreview(api, starts, "Classic hard snap");
+  assert.deepEqual(
+    await chainIds(evaluate),
+    [],
+    "Tuning presets can be auditioned before adding them",
+  );
+  await backToStack(api);
+  await click('[aria-label="Stop playback"]');
   await click('[aria-label="Rap"]');
   assert.equal(
     await evaluate("document.querySelectorAll('.effect-card').length"),

@@ -21,7 +21,12 @@ import {
   resetEffectSettings,
 } from "./effect-settings";
 import { listRecordings, putRecording, removeRecording } from "./storage";
-import type { SavedRecording, Studio } from "./studio-types";
+import type {
+  PreferencePatch,
+  SavedRecording,
+  Studio,
+  StudioPreferences,
+} from "./studio-types";
 
 function worker(): Worker {
   return new Worker(new URL("./audio/processing.worker.ts", import.meta.url), {
@@ -44,6 +49,13 @@ export function useStudio(): Studio {
   );
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
+  const [preferences, setPreferences] = useState<StudioPreferences>({
+    microphoneId: "",
+    microphoneLabel: "",
+    exportFolder: null,
+    exportFormat: "wav",
+    exportBitrate: 192,
+  });
   const [audio, setAudio] = useState<AudioData | null>(null);
   const [processed, setProcessed] = useState<AudioData | null>(null);
   const [settings, setSettings] = useState<StudioSettings>({
@@ -196,6 +208,16 @@ export function useStudio(): Studio {
         if (mounted.current) setError(message(e));
       });
     void refreshDevices();
+    void window.voiceforge
+      ?.getPreferences()
+      .then((saved) => {
+        if (!mounted.current) return;
+        setPreferences(saved);
+        setDeviceId(saved.microphoneId);
+      })
+      .catch((error) => {
+        if (mounted.current) setError(message(error));
+      });
     navigator.mediaDevices?.addEventListener("devicechange", refreshDevices);
     return () => {
       mounted.current = false;
@@ -300,10 +322,18 @@ export function useStudio(): Studio {
 
   const updateSettings = useCallback(
     (patch: Partial<StudioSettings>) => {
-      cancelAudition();
+      const tuningEdit =
+        "tuningKey" in patch ||
+        "tuningScale" in patch ||
+        "tuningRetuneMs" in patch;
+      if (!tuningEdit) cancelAudition();
       dirty.current = Boolean(audio);
       editRevision.current++;
-      if (source.current || previewAfterRender.current)
+      if (
+        source.current ||
+        previewAfterRender.current ||
+        (tuningEdit && previewPresetRef.current)
+      )
         previewAfterRender.current = true;
       if (audio) {
         processedRef.current = null;
@@ -559,20 +589,57 @@ export function useStudio(): Studio {
           "Microphone access is unavailable. Open the Windows app or localhost preview.",
         );
       // getUserMedia is requested only after the user's Record action.
-      const media = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-        },
-      });
+      const audioConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+      };
+      const sameLabel = devices.filter(
+        (device) =>
+          device.label &&
+          device.label === preferences.microphoneLabel &&
+          device.deviceId !== "default" &&
+          device.deviceId !== "communications",
+      );
+      const requested =
+        deviceId &&
+        deviceId === preferences.microphoneId &&
+        !devices.some((device) => device.deviceId === deviceId) &&
+        sameLabel.length === 1
+          ? sameLabel[0].deviceId
+          : deviceId;
+      let media: MediaStream;
+      let usedFallback = false;
+      try {
+        media = await navigator.mediaDevices.getUserMedia({
+          audio: requested
+            ? { ...audioConstraints, deviceId: { exact: requested } }
+            : audioConstraints,
+        });
+      } catch (error) {
+        if (
+          !requested ||
+          !(error instanceof DOMException) ||
+          !["NotFoundError", "OverconstrainedError"].includes(error.name)
+        )
+          throw error;
+        if (!mounted.current || generation !== sessionGeneration.current)
+          return;
+        media = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints,
+        });
+        usedFallback = true;
+      }
       if (!mounted.current || generation !== sessionGeneration.current) {
         media.getTracks().forEach((track) => track.stop());
         return;
       }
       stream.current = media;
+      if (usedFallback)
+        setNotice(
+          "The selected microphone is unavailable. Recording with the system default.",
+        );
       const ctx = await getContext();
       if (!mounted.current || generation !== sessionGeneration.current) {
         media.getTracks().forEach((track) => track.stop());
@@ -789,7 +856,11 @@ export function useStudio(): Studio {
     }
   };
 
-  const exportAudio = async (format: "wav" | "mp3", bitrate = 192) => {
+  const exportAudio = async (
+    format: "wav" | "mp3",
+    bitrate = 192,
+    fast = false,
+  ) => {
     if (
       !processed ||
       processing ||
@@ -854,12 +925,13 @@ export function useStudio(): Studio {
           name: filename,
           format,
           data,
+          fast,
         });
         if (result.canceled) {
           setNotice("Export canceled. Your take is still here.");
           return;
         }
-        setNotice(`Exported ${filename}`);
+        setNotice(`Exported ${fast ? (result.path ?? filename) : filename}`);
       } else {
         const url = URL.createObjectURL(
           new Blob([data], {
@@ -937,6 +1009,23 @@ export function useStudio(): Studio {
   const selectedEffect = effectChain.find(
     (effect) => effect.id === selectedEffectId,
   );
+  const detectMicrophones = async () => {
+    if (acquiring.current || recordingState !== "idle") return;
+    acquiring.current = true;
+    let input: MediaStream | undefined;
+    try {
+      input = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (mounted.current) await refreshDevices();
+    } finally {
+      input?.getTracks().forEach((track) => track.stop());
+      acquiring.current = false;
+    }
+  };
+  const savePreferences = async (patch: PreferencePatch) => {
+    const saved = await window.voiceforge!.savePreferences(patch);
+    setPreferences(saved);
+    if (patch.microphoneId !== undefined) setDeviceId(saved.microphoneId);
+  };
   return {
     name,
     setName: (value) => {
@@ -955,6 +1044,11 @@ export function useStudio(): Studio {
     deviceId,
     setDeviceId,
     refreshDevices,
+    detectMicrophones,
+    preferences,
+    savePreferences,
+    chooseExportFolder: async () =>
+      setPreferences(await window.voiceforge!.chooseExportFolder()),
     audio,
     waveform,
     duration: originalPreview
@@ -1003,6 +1097,8 @@ export function useStudio(): Studio {
     importFile,
     loadDemo,
     exportAudio,
+    fastExport: () =>
+      exportAudio(preferences.exportFormat, preferences.exportBitrate, true),
     exporting,
     recordings,
     saveRecording,

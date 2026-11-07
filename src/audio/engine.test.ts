@@ -162,6 +162,21 @@ describe("recording rendering", () => {
 });
 
 describe("musical pitch processing", () => {
+  it("uses retune timing to retain more of a short pitch change", () => {
+    const samples = tone(430, 0.11);
+    const source = { samples, sampleRate: rate };
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      presetId: "autotune",
+      normalize: false,
+    };
+    const snap = renderAudio(source, { ...settings, tuningRetuneMs: 0 });
+    const soft = renderAudio(source, { ...settings, tuningRetuneMs: 150 });
+    const snapPitch = dominantFrequency(snap.samples, 425, 445);
+    const softPitch = dominantFrequency(soft.samples, 425, 445);
+    expect(snapPitch).toBeGreaterThan(softPitch + 3);
+    expect(soft.samples.length).toBe(samples.length);
+  });
   it("detects voiced fundamental frequency and rejects silence", () => {
     expect(detectPitch(tone(220, 0.12), rate)).toBeCloseTo(220, 0);
     expect(detectPitch(new Float32Array(4096), rate)).toBe(0);

@@ -24,11 +24,12 @@ function validateExport(payload) {
     typeof payload !== "object" ||
     Array.isArray(payload) ||
     Object.keys(payload).some(
-      (key) => !["name", "format", "data"].includes(key),
+      (key) => !["name", "format", "data", "fast"].includes(key),
     ) ||
     typeof payload.name !== "string" ||
     payload.name.length > 500 ||
     !["wav", "mp3"].includes(payload.format) ||
+    (payload.fast !== undefined && typeof payload.fast !== "boolean") ||
     !(payload.data instanceof ArrayBuffer) ||
     payload.data.byteLength < 4 ||
     payload.data.byteLength > MAX_EXPORT_BYTES
@@ -59,6 +60,7 @@ function validateExport(payload) {
   return {
     name: safeFileName(payload.name, payload.format),
     format: payload.format,
+    fast: payload.fast === true,
     bytes,
   };
 }

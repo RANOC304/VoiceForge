@@ -5,6 +5,11 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
+  createPreferences,
+  validatePreferencePatch,
+  writeFastExport,
+} = require("./preferences.cjs");
+const {
   validateExport,
   isTrustedSender,
   allowMediaPermission,
@@ -142,17 +147,60 @@ if (!app.requestSingleInstanceLock()) {
         });
       });
 
+      const preferences = createPreferences(
+        path.join(app.getPath("userData"), "studio-preferences.json"),
+      );
       // https://www.electronjs.org/docs/latest/api/ipc-main#ipcmainhandlechannel-listener
-      ipcMain.handle("voiceforge:save-audio", async (event, payload) => {
-        if (!isTrustedSender(event, mainWindow?.webContents, trustedUrl))
-          throw new Error("Untrusted export request.");
+      const handle = (channel, run) =>
+        ipcMain.handle(`voiceforge:${channel}`, (event, payload) => {
+          if (!isTrustedSender(event, mainWindow?.webContents, trustedUrl))
+            throw new Error("Untrusted studio request.");
+          return run(payload);
+        });
+      handle("get-preferences", () => preferences.read());
+      handle("save-preferences", (patch) =>
+        preferences.update(validatePreferencePatch(patch)),
+      );
+      handle("choose-export-folder", async () => {
+        if (exporting) throw new Error("A file dialog is already open.");
+        exporting = true;
+        try {
+          // The renderer never supplies a path. Only the native folder picker can authorize one.
+          // https://www.electronjs.org/docs/latest/api/dialog#dialogshowopendialogwindow-options
+          const { exportFolder } = await preferences.read();
+          const result = await dialog.showOpenDialog(mainWindow, {
+            title: "Choose your default export folder",
+            defaultPath: exportFolder ?? app.getPath("music"),
+            properties: ["openDirectory"],
+          });
+          if (result.canceled || !result.filePaths[0])
+            return preferences.read();
+          const folder = await fs.realpath(result.filePaths[0]);
+          if (!(await fs.stat(folder)).isDirectory())
+            throw new Error("Choose an existing folder.");
+          return await preferences.update({ exportFolder: folder });
+        } finally {
+          exporting = false;
+        }
+      });
+
+      handle("save-audio", async (payload) => {
         if (exporting) throw new Error("An export dialog is already open.");
         const audio = validateExport(payload);
         exporting = true;
         try {
+          const { exportFolder } = await preferences.read();
+          if (audio.fast)
+            return {
+              canceled: false,
+              path: await writeFastExport(exportFolder, audio),
+            };
           const selection = await dialog.showSaveDialog(mainWindow, {
             title: "Export your recording",
-            defaultPath: path.join(app.getPath("music"), audio.name),
+            defaultPath: path.join(
+              exportFolder ?? app.getPath("music"),
+              audio.name,
+            ),
             buttonLabel: "Export audio",
             filters: [
               {
@@ -176,6 +224,7 @@ if (!app.requestSingleInstanceLock()) {
           await fs.writeFile(selection.filePath, audio.bytes);
           return { canceled: false, path: selection.filePath };
         } catch (error) {
+          if (audio.fast) throw error;
           if (
             error?.message ===
             "Use the selected audio format as the file extension."
