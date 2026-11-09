@@ -103,11 +103,7 @@ export interface Studio {
   seek: (seconds: number) => void;
   importFile: (file: File) => Promise<void>;
   loadDemo: () => Promise<void>;
-  exportAudio: (
-    format: "wav" | "mp3",
-    bitrate?: number,
-    scope?: "track" | "mix",
-  ) => Promise<void>;
+  exportAudio: (format: "wav" | "mp3", bitrate?: number) => Promise<void>;
   fastExport: () => Promise<void>;
   exporting: boolean;
   recordings: RecordingSummary[];

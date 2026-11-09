@@ -37,3 +37,15 @@ it("keeps relative levels when overlapping tracks exceed full scale", () => {
   expect(mix.samples[1200]).toBeCloseTo(0.49);
   expect(mix.samples[3600]).toBeCloseTo(0.98);
 });
+
+it("mixes audio from tracks beyond the former eight-track cap", () => {
+  const track = {
+    audio: { sampleRate: 48000, samples: new Float32Array(480).fill(0.05) },
+    settings: { ...DEFAULT_SETTINGS, normalize: false },
+    offset: 0,
+    volume: 1,
+    muted: false,
+  };
+  const mix = mixTracks(Array.from({ length: 12 }, () => track));
+  expect(mix.samples[240]).toBeCloseTo(0.6);
+});

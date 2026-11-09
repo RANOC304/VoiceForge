@@ -2,9 +2,7 @@ import { MAX_RENDER_SECONDS } from "./chain";
 import { renderAudio } from "./engine";
 import type { AudioData, StudioSettings } from "./types";
 
-export const MAX_TRACKS = 8;
 export const MAX_TRACK_OFFSET = 600;
-export const MAX_PROJECT_SOURCE_SECONDS = 1800;
 const MIX_RATE = 48000;
 
 export interface MixTrack {
@@ -16,18 +14,6 @@ export interface MixTrack {
 }
 
 export function mixTracks(tracks: MixTrack[]): AudioData {
-  if (tracks.length > MAX_TRACKS)
-    throw new Error(`A mix can contain up to ${MAX_TRACKS} tracks.`);
-  if (
-    tracks.reduce(
-      (seconds, track) =>
-        seconds + track.audio.samples.length / track.audio.sampleRate,
-      0,
-    ) > MAX_PROJECT_SOURCE_SECONDS
-  )
-    throw new Error(
-      "A project can hold up to 30 minutes of source audio across its tracks.",
-    );
   let samples = new Float32Array(0);
   for (const track of tracks) {
     if (track.muted) continue;

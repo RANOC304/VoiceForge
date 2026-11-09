@@ -55,7 +55,7 @@ import type { EffectPreset, StudioSettings } from "./audio/types";
 import type { Studio } from "./studio-types";
 import { TrimOverlay } from "./components/TrimOverlay";
 import { waveformPeaks } from "./audio/utils";
-import { MAX_TRACK_OFFSET, MAX_TRACKS } from "./audio/mix";
+import { MAX_TRACK_OFFSET } from "./audio/mix";
 import { resizeTrim, type TrimRange } from "./trim";
 
 const formatTime = (seconds: number, decimals = false) => {
@@ -1130,10 +1130,7 @@ function TrackPanel({
         <div>
           <div className="eyebrow">MULTITRACK</div>
           <h2>
-            Project tracks{" "}
-            <small>
-              {studio.tracks.length}/{MAX_TRACKS}
-            </small>
+            Project tracks <small>{studio.tracks.length}</small>
           </h2>
         </div>
         <div className="track-panel-actions">
@@ -1157,7 +1154,7 @@ function TrackPanel({
           </button>
           <button
             className="button soft-orange small"
-            disabled={disabled || studio.tracks.length >= MAX_TRACKS}
+            disabled={disabled}
             onClick={studio.addTrack}
           >
             <Plus size={14} /> Add track
@@ -1882,28 +1879,18 @@ export default function App() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [format, setFormat] = useState<"wav" | "mp3">("wav");
   const [bitrate, setBitrate] = useState(192);
-  const [exportScope, setExportScope] = useState<"track" | "mix">("track");
   const fileInput = useRef<HTMLInputElement>(null);
   const effectsRef = useRef<HTMLElement>(null);
   const busy = studio.processing || studio.exporting || studio.mixing;
   const recording = studio.recordingState !== "idle";
   const hasAudio = studio.tracks.some((track) => track.audio);
-  const audibleTracks = studio.tracks.filter(
-    (track) => track.audio && !track.muted,
-  ).length;
   const activeTrack = studio.tracks.find(
     (track) => track.id === studio.activeTrackId,
   );
-  const canExport = Boolean(studio.audio || audibleTracks);
   const openImport = () => fileInput.current?.click();
   const openExport = () => {
     setFormat(studio.preferences.exportFormat);
     setBitrate(studio.preferences.exportBitrate);
-    setExportScope(
-      (studio.tracks.length > 1 && audibleTracks > 0) || !studio.audio
-        ? "mix"
-        : "track",
-    );
     setModal("export");
   };
   const goStudio = () => setPage("studio");
@@ -2009,7 +1996,7 @@ export default function App() {
           </button>
           <div className="app-version">
             <span>VOICEFORGE</span>
-            <span>V{window.voiceforge?.version || "1.3.0"}</span>
+            <span>V{window.voiceforge?.version || "1.3.1"}</span>
           </div>
         </div>
       </aside>
@@ -2116,7 +2103,7 @@ export default function App() {
                       </button>
                       <button
                         className="button soft-orange small"
-                        disabled={!canExport || recording || busy}
+                        disabled={!studio.audio || recording || busy}
                         onClick={openExport}
                       >
                         <ArrowDownToLine size={14} />
@@ -2125,13 +2112,7 @@ export default function App() {
                       {window.voiceforge && (
                         <button
                           className="button soft-orange small fast-export-button"
-                          disabled={
-                            (studio.tracks.length > 1
-                              ? !audibleTracks
-                              : !studio.audio) ||
-                            recording ||
-                            busy
-                          }
+                          disabled={!studio.audio || recording || busy}
                           title={
                             studio.preferences.exportFolder
                               ? `Export ${studio.preferences.exportFormat.toUpperCase()} to ${studio.preferences.exportFolder}`
@@ -2240,29 +2221,9 @@ export default function App() {
           }}
         >
           <p className="modal-intro">
-            Your applied stack and trim are included. A preview is never saved
-            or exported unless you add it to the stack.
+            Export “{activeTrack?.name || "Selected track"}” with its trim and
+            applied effects.
           </p>
-          {studio.tracks.length > 1 && (
-            <label className="bitrate-field export-scope">
-              Export audio from
-              <select
-                aria-label="Export audio from"
-                value={exportScope}
-                disabled={studio.exporting}
-                onChange={(event) =>
-                  setExportScope(event.target.value === "mix" ? "mix" : "track")
-                }
-              >
-                <option value="mix" disabled={!audibleTracks}>
-                  Project mix
-                </option>
-                <option value="track" disabled={!studio.audio}>
-                  Selected track · {activeTrack?.name || "Untitled track"}
-                </option>
-              </select>
-            </label>
-          )}
           <div className="export-format-options">
             <button
               className={format === "wav" ? "selected" : ""}
@@ -2311,26 +2272,20 @@ export default function App() {
             <div>
               <strong>
                 {studio.name || "Untitled recording"}
-                {exportScope === "track" && studio.tracks.length > 1
+                {studio.tracks.length > 1
                   ? ` - ${activeTrack?.name || "Track"}`
                   : ""}
                 .{format}
               </strong>
               <span>
-                {exportScope === "mix" ? (
-                  `${audibleTracks} ${audibleTracks === 1 ? "track" : "tracks"} in the mix`
-                ) : (
-                  <>
-                    {formatTime(
-                      Math.max(
-                        0,
-                        (studio.settings.trimEnd || sourceDuration) -
-                          studio.settings.trimStart,
-                      ),
-                    )}{" "}
-                    source · {effectSummary(studio.settings)}
-                  </>
-                )}
+                {formatTime(
+                  Math.max(
+                    0,
+                    (studio.settings.trimEnd || sourceDuration) -
+                      studio.settings.trimStart,
+                  ),
+                )}{" "}
+                source · {effectSummary(studio.settings)}
               </span>
             </div>
           </div>
@@ -2344,13 +2299,9 @@ export default function App() {
             </button>
             <button
               className="button primary"
-              disabled={
-                studio.exporting ||
-                studio.processing ||
-                (exportScope === "mix" ? !audibleTracks : !studio.audio)
-              }
+              disabled={studio.exporting || studio.processing || !studio.audio}
               onClick={async () => {
-                await studio.exportAudio(format, bitrate, exportScope);
+                await studio.exportAudio(format, bitrate);
                 setModal(null);
               }}
             >

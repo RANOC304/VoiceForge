@@ -12,12 +12,7 @@ import {
 } from "./audio/utils";
 import { safeFilename } from "./audio/utils";
 import { getEffectChain } from "./audio/chain";
-import {
-  MAX_PROJECT_SOURCE_SECONDS,
-  MAX_TRACK_OFFSET,
-  MAX_TRACKS,
-  type MixTrack,
-} from "./audio/mix";
+import { MAX_TRACK_OFFSET, type MixTrack } from "./audio/mix";
 import { makeEffectPreviewSettings } from "./effect-preview";
 import {
   appendEffect,
@@ -153,7 +148,6 @@ export function useStudio(): Studio {
   const playOffset = useRef(0);
   const captureStarted = useRef(0);
   const captureElapsed = useRef(0);
-  const captureMax = useRef(MAX_SECONDS);
   const meterFrame = useRef(0);
   const captureLimitTimer = useRef<number | undefined>(undefined);
   const playbackFrame = useRef(0);
@@ -691,21 +685,6 @@ export function useStudio(): Studio {
     !mixWorker.current &&
     !saving.current;
 
-  const trackSourceLimit = () =>
-    Math.min(
-      MAX_SECONDS,
-      MAX_PROJECT_SOURCE_SECONDS -
-        tracks.reduce(
-          (seconds, track) =>
-            track.id !== activeTrackId && track.audio
-              ? seconds + track.audio.samples.length / track.audio.sampleRate
-              : seconds,
-          0,
-        ),
-    );
-  const projectLimitMessage =
-    "A project can hold up to 30 minutes of source audio across its tracks.";
-
   const activateTrack = (rows: StudioTrack[], next: StudioTrack) => {
     // The active editor owns its audio. Keep only the inactive tracks' PCM here.
     setTrackRows(
@@ -725,9 +704,10 @@ export function useStudio(): Studio {
   };
 
   const addTrack = () => {
-    if (!canChangeTracks() || tracks.length >= MAX_TRACKS) return;
+    if (!canChangeTracks()) return;
+    const names = new Set(tracks.map((track) => track.name));
     let number = 1;
-    while (tracks.some((track) => track.name === `Track ${number}`)) number++;
+    while (names.has(`Track ${number}`)) number++;
     const next = emptyTrack(`Track ${number}`);
     activateTrack([...tracks, next], next);
     if (tracks.some((track) => track.audio)) dirty.current = true;
@@ -797,9 +777,6 @@ export function useStudio(): Studio {
       const ctx = await getContext();
       const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
       if (!mounted.current || generation !== sessionGeneration.current) return;
-      const limit = trackSourceLimit();
-      if (limit < MAX_SECONDS && buffer.duration > limit)
-        throw new Error(projectLimitMessage);
       loadAudio(
         bufferToAudio(buffer),
         file.name.replace(/\.[^.]+$/, ""),
@@ -819,12 +796,7 @@ export function useStudio(): Studio {
 
   const loadDemo = async () => {
     if (!canChangeTracks() || !canReplace()) return;
-    const demo = makeDemo();
-    if (demo.samples.length / demo.sampleRate > trackSourceLimit()) {
-      setError(projectLimitMessage);
-      return;
-    }
-    loadAudio(demo, "Sound demo");
+    loadAudio(makeDemo(), "Sound demo");
     setNotice(
       "Synthesized vowel melody loaded. Record your voice for the real thing.",
     );
@@ -841,11 +813,6 @@ export function useStudio(): Studio {
       !canReplace()
     )
       return;
-    captureMax.current = Math.floor(trackSourceLimit() * 48000) / 48000;
-    if (captureMax.current < 1) {
-      setError(projectLimitMessage);
-      return;
-    }
     acquiring.current = true;
     setError(null);
     const generation = ++sessionGeneration.current;
@@ -976,7 +943,7 @@ export function useStudio(): Studio {
           if (!mounted.current || generation !== sessionGeneration.current)
             return;
           // MediaRecorder's final encoded block can slightly exceed the stop deadline.
-          const next = bufferToAudio(decoded, captureMax.current);
+          const next = bufferToAudio(decoded, MAX_SECONDS);
           loadAudio(
             next,
             `Recording ${new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`,
@@ -1003,7 +970,7 @@ export function useStudio(): Studio {
               ? (performance.now() - captureStarted.current) / 1000
               : 0);
           setRecordingSeconds(elapsed);
-          if (elapsed >= captureMax.current) {
+          if (elapsed >= MAX_SECONDS) {
             capture.stop();
             setNotice("The recording limit was reached. Your take is ready.");
             return;
@@ -1066,7 +1033,7 @@ export function useStudio(): Studio {
           setNotice("The recording limit was reached. Your take is ready.");
         }
       },
-      Math.max(0, captureMax.current - elapsed) * 1000,
+      Math.max(0, MAX_SECONDS - elapsed) * 1000,
     );
   };
   const pauseRecording = () => {
@@ -1173,13 +1140,16 @@ export function useStudio(): Studio {
         id,
         name: name.trim().slice(0, 120) || "Untitled recording",
         createdAt: existing?.createdAt ?? Date.now(),
-        duration: Math.max(
-          ...tracks.map((track) =>
+        duration: tracks.reduce(
+          (duration, track) =>
             track.audio
-              ? track.offset +
-                track.audio.samples.length / track.audio.sampleRate
-              : 0,
-          ),
+              ? Math.max(
+                  duration,
+                  track.offset +
+                    track.audio.samples.length / track.audio.sampleRate,
+                )
+              : duration,
+          0,
         ),
         audio: primary.audio,
         settings: primary.settings,
@@ -1223,11 +1193,11 @@ export function useStudio(): Studio {
   const exportAudio = async (
     format: "wav" | "mp3",
     bitrate = 192,
-    scope: "track" | "mix" = "track",
     fast = false,
   ) => {
     if (
-      (scope === "track" && !processed) ||
+      !audio ||
+      !processed ||
       processing ||
       exportBusy.current ||
       mixWorker.current ||
@@ -1242,23 +1212,15 @@ export function useStudio(): Studio {
       const task = worker();
       encodingWorker.current = task;
       // An audition is never committed to an export: render the applied stack instead.
-      const outputAudio =
-        scope === "mix"
-          ? (
-              await runAudioTask(task, {
-                operation: "mix",
-                tracks: mixInputs(),
-              })
-            ).audio
-          : previewPresetRef.current
-            ? (
-                await runAudioTask(task, {
-                  operation: "render",
-                  audio: audio!,
-                  settings: settingsRef.current,
-                })
-              ).audio
-            : processed;
+      const outputAudio = previewPresetRef.current
+        ? (
+            await runAudioTask(task, {
+              operation: "render",
+              audio,
+              settings: settingsRef.current,
+            })
+          ).audio
+        : processed;
       if (!outputAudio)
         throw new Error("The applied effect stack could not be rendered.");
       const data = (
@@ -1274,9 +1236,7 @@ export function useStudio(): Studio {
         (track) => track.id === activeTrackId,
       )?.name;
       const filename = safeFilename(
-        scope === "track" && tracks.length > 1
-          ? `${name} - ${trackName || "Track"}`
-          : name,
+        tracks.length > 1 ? `${name} - ${trackName || "Track"}` : name,
         format,
       );
       if (window.voiceforge) {
@@ -1499,12 +1459,7 @@ export function useStudio(): Studio {
     loadDemo,
     exportAudio,
     fastExport: () =>
-      exportAudio(
-        preferences.exportFormat,
-        preferences.exportBitrate,
-        tracks.length > 1 || !audio ? "mix" : "track",
-        true,
-      ),
+      exportAudio(preferences.exportFormat, preferences.exportBitrate, true),
     exporting,
     recordings,
     saveRecording,

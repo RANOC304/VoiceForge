@@ -256,33 +256,29 @@ app
 
     exportFormat = "wav";
     await button("Export");
-    assert.equal(
-      await evaluate(
-        `document.querySelector('[aria-label="Export audio from"]').value`,
-      ),
-      "mix",
-    );
     await click(".export-format-options button:first-child");
-    await button("Export WAV");
-    await waitFor(`!document.querySelector('[role="dialog"]')`);
-    const mixed = await fs.readFile(path.join(output, "voiceforge-test.wav"));
-    assert.ok(mixed.readUInt32LE(40) / 96000 > 13);
-    assert.ok(
-      mixed.subarray(44 + 96000, 44 + 192000).some((sample) => sample !== 0),
-    );
-    assert.ok(mixed.subarray(44 + 12 * 96000).some((sample) => sample !== 0));
-
-    await button("Export");
-    await click(".export-format-options button:first-child");
-    await evaluate(`(() => {
-      const select = document.querySelector('[aria-label="Export audio from"]');
-      select.value = 'track';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`);
     await button("Export WAV");
     await waitFor(`!document.querySelector('[role="dialog"]')`);
     const solo = await fs.readFile(path.join(output, "voiceforge-test.wav"));
-    assert.ok(solo.readUInt32LE(40) / 96000 < 12);
+    assert.ok(
+      solo.readUInt32LE(40) / 96000 < 6,
+      "Export contains the short selected take without the other track or mix start offset",
+    );
+
+    exportFormat = "mp3";
+    await button("Export");
+    await button("Export MP3");
+    await waitFor(`!document.querySelector('[role="dialog"]')`);
+    const soloMp3 = await fs.readFile(path.join(output, "voiceforge-test.mp3"));
+    await button("Fast export");
+    await waitFor(
+      `document.querySelector('.toast')?.textContent.includes('fast exports') && document.querySelector('.toast')?.textContent.includes('Sound demo - Track 2.mp3')`,
+    );
+    assert.deepEqual(
+      await fs.readFile(path.join(fastFolder, "Sound demo - Track 2.mp3")),
+      soloMp3,
+      "Fast export encodes the same selected track as Export",
+    );
 
     window.webContents.reload();
     await waitFor(
@@ -329,6 +325,22 @@ app
       ),
       false,
     );
+    for (let track = 3; track <= 10; track++) {
+      await button("Add track");
+      await waitFor(
+        `document.querySelector('[aria-label="Select track ${track}"][aria-pressed="true"]')`,
+      );
+    }
+    assert.equal(
+      await evaluate(`document.querySelectorAll('.project-tracks li').length`),
+      10,
+    );
+    assert.deepEqual(
+      await evaluate(
+        `[...document.querySelectorAll('.session-actions button')].filter(b=>['Export','Fast export'].includes(b.textContent.trim())).map(b=>b.disabled)`,
+      ),
+      [true, true],
+    );
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(
       JSON.stringify({
@@ -354,7 +366,8 @@ app
           "synthetic microphone recording",
           "pause/resume",
           "reusable stack presets persist and restore order and bypass state",
-          "multitrack overdub monitoring, mix playback and mix versus track export",
+          "multitrack overdub monitoring, mix playback and selected-track exports",
+          "more than eight tracks and exports disabled on an empty selection",
           "saved projects reload track state and clearing only affects the open take",
         ],
         output,

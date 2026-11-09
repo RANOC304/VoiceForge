@@ -23,7 +23,7 @@ Use **Add track** under the recorder to create another layer. Select a track to 
 
 Set **Start (s)** to place each trimmed track in the mix. Use **Level %** and **Mute** to balance the tracks, then press **Play mix** to hear them together. Enable **Hear other tracks while recording** to record one microphone layer against the rest of the project. Use headphones to keep the backing tracks out of the microphone.
 
-**Save** stores the whole project in **My recordings**. In **Export**, choose the project mix or the selected track. **Fast export** uses the mix in a multitrack project. A project holds up to eight tracks and 30 minutes of total source audio, with up to ten minutes per track.
+**Save** stores the whole project in **My recordings**. **Export** and **Fast export** write the selected track with its trim and applied effects. Add as many tracks as you need. Each take can be up to ten minutes.
 
 ## Effects
 

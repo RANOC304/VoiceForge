@@ -611,9 +611,6 @@ h1 {
 .stack-preset-form {
   margin-top: 12px;
 }
-.export-scope {
-  margin: 12px 0;
-}
 .studio-preferences {
   display: grid;
   gap: 13px;
