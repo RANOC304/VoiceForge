@@ -94,3 +94,7 @@ Only the fixed local development address `http://127.0.0.1:5173/` is accepted. A
 The interface uses React and TypeScript, bundled by Vite. A sandboxed Electron renderer captures microphone audio. A worker applies local digital signal processing and encodes exports. MP3 encoding uses LAME through `@breezystack/lamejs`. The native bridge handles preferences, folder selection, and export, with sender and payload validation.
 
 See [audio processing details](docs/AUDIO.md), [development notes](docs/DEVELOPMENT.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Contributing and license
+
+See the [contributor guide](CONTRIBUTING.md) for bug reports and pull requests. VoiceForge's original code is available under the [MIT License](LICENSE). [Third-party notices](THIRD_PARTY_NOTICES.md) cover dependencies and bundled components.
